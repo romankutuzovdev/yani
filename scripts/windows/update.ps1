@@ -1,8 +1,5 @@
 # Update Yani from GitHub + rebuild
-# Encoding: ASCII only
-#
-# IMPORTANT: stop the running app first (Ctrl+C), or this script will
-# stop Node processes on port 8080 so Prisma can replace its DLL.
+# Encoding: ASCII only (no Unicode dashes/quotes - breaks Windows PowerShell)
 #
 #   powershell -ExecutionPolicy Bypass -File .\scripts\windows\update.ps1
 
@@ -20,7 +17,7 @@ Set-Location $Root
 
 function Stop-YaniOnPort {
   param([int]$Port = 8080)
-  Write-Host "==> Stopping processes on port $Port (unlock Prisma DLL)..." -ForegroundColor Cyan
+  Write-Host "==> Stopping processes on port $Port ..." -ForegroundColor Cyan
   try {
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
   } catch {
@@ -32,18 +29,17 @@ function Stop-YaniOnPort {
       try {
         $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
         if ($p) {
-          Write-Host "    stop PID $procId ($($p.ProcessName))" -ForegroundColor Yellow
+          Write-Host ("    stop PID {0} ({1})" -f $procId, $p.ProcessName) -ForegroundColor Yellow
           Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
         }
       } catch {}
     }
   }
-  # Also stop orphan next/node that may still hold query_engine-windows.dll.node
   Get-Process node -ErrorAction SilentlyContinue | ForEach-Object {
     try {
-      $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine
+      $cmd = (Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $_.Id)).CommandLine
       if ($cmd -and ($cmd -like "*yani*" -or $cmd -like "*next*")) {
-        Write-Host "    stop node PID $($_.Id)" -ForegroundColor Yellow
+        Write-Host ("    stop node PID {0}" -f $_.Id) -ForegroundColor Yellow
         Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
       }
     } catch {}
@@ -51,25 +47,26 @@ function Stop-YaniOnPort {
   Start-Sleep -Seconds 2
 }
 
-function Assert-Ok($step) {
+function Assert-Ok {
+  param([string]$Step)
   if ($LASTEXITCODE -ne 0) {
-    throw "$step failed (exit $LASTEXITCODE)"
+    throw ("{0} failed (exit {1})" -f $Step, $LASTEXITCODE)
   }
 }
 
 Stop-YaniOnPort 8080
 
 if (-not $SkipGit) {
-  Write-Host "==> Fetch origin/$Branch..." -ForegroundColor Cyan
+  Write-Host ("==> Fetch origin/{0}..." -f $Branch) -ForegroundColor Cyan
   git fetch origin $Branch
   Assert-Ok "git fetch"
   $local = (git rev-parse HEAD).Trim()
-  $remote = (git rev-parse "origin/$Branch").Trim()
+  $remote = (git rev-parse ("origin/{0}" -f $Branch)).Trim()
 
   if ($local -eq $remote) {
-    Write-Host "==> Git already up to date ($local) — rebuilding anyway" -ForegroundColor Green
+    Write-Host ("==> Git already up to date ({0}) - rebuilding anyway" -f $local) -ForegroundColor Green
   } else {
-    Write-Host "==> Updating $local -> $remote" -ForegroundColor Yellow
+    Write-Host ("==> Updating {0} -> {1}" -f $local, $remote) -ForegroundColor Yellow
     git pull origin $Branch
     Assert-Ok "git pull"
   }
