@@ -84,9 +84,15 @@ Write-Host "==> prisma db push..." -ForegroundColor Cyan
 npx prisma db push
 Assert-Ok "prisma db push"
 
+Write-Host "==> check hero image files..." -ForegroundColor Cyan
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\check-hero.ps1
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "Hero PNG files missing after git pull. Aborting." -ForegroundColor Red
+  exit 1
+}
+
 Write-Host "==> fix character asset URLs..." -ForegroundColor Cyan
 npx tsx scripts/fix-character-urls.ts
-# non-fatal if script missing on old builds
 if ($LASTEXITCODE -ne 0) {
   Write-Host "    (skip fix-character-urls)" -ForegroundColor Yellow
 }

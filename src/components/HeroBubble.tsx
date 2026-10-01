@@ -7,9 +7,10 @@ import {
   resolveCharacterAsset,
   type CharacterAssetView,
 } from "@/characters/CharacterRenderer";
+import { DEFAULT_HERO_ASSETS } from "@/characters/defaults";
 import type { CharacterState } from "@prisma/client";
 import { cn } from "@/lib/utils";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 /** Compact circular hero for chat empty-state / header */
 export function HeroBubble({
@@ -26,15 +27,21 @@ export function HeroBubble({
   className?: string;
 }) {
   const state = agentStatusToCharacterState(status) as CharacterState;
-  const asset = resolveCharacterAsset(assets, state);
+  const effectiveAssets = useMemo(
+    () => (assets?.length ? assets : (DEFAULT_HERO_ASSETS as CharacterAssetView[])),
+    [assets],
+  );
+  const asset = resolveCharacterAsset(effectiveAssets, state);
   const video = isVideoAsset(asset);
-  const primary = asset ? normalizeAssetUrl(asset.url) : "";
+  const primary = asset ? normalizeAssetUrl(asset.url) : "/characters/yani/idle.png";
   const [src, setSrc] = useState(primary);
+  const [failed, setFailed] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    setSrc(asset ? normalizeAssetUrl(asset.url) : "");
-  }, [asset?.url]);
+    setFailed(false);
+    setSrc(asset ? normalizeAssetUrl(asset.url) : "/characters/yani/idle.png");
+  }, [asset?.url, state]);
 
   useEffect(() => {
     if (!video) return;
@@ -42,17 +49,18 @@ export function HeroBubble({
   }, [video, src]);
 
   const dim =
-    size === "sm" ? "h-10 w-10" : size === "md" ? "h-24 w-24" : "h-40 w-40 sm:h-48 sm:w-48";
+    size === "sm" ? "h-10 w-10" : size === "md" ? "h-24 w-24" : "h-44 w-44 sm:h-52 sm:w-52";
 
   return (
     <div
       className={cn(
-        "relative shrink-0 overflow-hidden rounded-full bg-transparent",
+        "relative shrink-0 overflow-hidden rounded-full bg-sky-50/80 ring-1 ring-slate-200/80",
         dim,
         className,
       )}
+      title={failed ? `Не загрузилось: ${src}` : name}
     >
-      {asset && src ? (
+      {!failed && src ? (
         video ? (
           <video
             ref={videoRef}
@@ -64,6 +72,7 @@ export function HeroBubble({
             muted
             playsInline
             aria-label={name}
+            onError={() => setFailed(true)}
           />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
@@ -73,14 +82,25 @@ export function HeroBubble({
             alt={name}
             className="absolute inset-0 h-full w-full object-contain"
             onError={() => {
-              if (src.endsWith(".png")) setSrc(src.replace(/\.png$/i, ".jpg"));
-              else if (/\.jpe?g$/i.test(src)) setSrc(src.replace(/\.jpe?g$/i, ".png"));
+              if (src.endsWith(".png") && !src.includes("idle.png")) {
+                setSrc("/characters/yani/idle.png");
+                return;
+              }
+              if (src.endsWith(".png")) {
+                setSrc(src.replace(/\.png$/i, ".jpg"));
+                return;
+              }
+              if (/\.jpe?g$/i.test(src)) {
+                setSrc(src.replace(/\.jpe?g$/i, ".png"));
+                return;
+              }
+              setFailed(true);
             }}
           />
         )
       ) : (
-        <div className="flex h-full w-full items-center justify-center bg-sky-50 text-2xl font-semibold text-sky-600">
-          {name.slice(0, 1).toUpperCase()}
+        <div className="flex h-full w-full flex-col items-center justify-center bg-sky-50 text-sky-700">
+          <span className="text-3xl font-semibold">{name.slice(0, 1).toUpperCase()}</span>
         </div>
       )}
     </div>

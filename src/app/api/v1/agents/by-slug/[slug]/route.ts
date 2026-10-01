@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { error, json } from "@/lib/api";
 import { asStringArray } from "@/lib/utils";
+import { withDefaultHeroAssets } from "@/characters/defaults";
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -37,6 +38,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
         })()
       : undefined;
 
+  const assets = withDefaultHeroAssets(agent.character?.assets);
+
   return json({
     agent: {
       id: agent.id,
@@ -50,7 +53,17 @@ export async function GET(_req: NextRequest, { params }: Params) {
         `Привет! Я ${agent.name}. Чем помочь?`,
       status: agent.status,
       statusMessage: agent.statusMessage,
-      character: agent.character,
+      character: agent.character
+        ? { ...agent.character, assets }
+        : {
+            id: "default",
+            name: agent.name,
+            description: "",
+            defaultState: "IDLE",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            assets,
+          },
       widget: agent.widgets[0] ?? null,
       tools: agent.tools.map((t) => ({
         name: t.tool.name,
