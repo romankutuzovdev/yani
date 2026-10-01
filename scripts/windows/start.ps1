@@ -34,4 +34,16 @@ Write-Host "    Chat:  http://91.149.133.54:8080/chat"
 Write-Host "    Admin: http://91.149.133.54:8080/login"
 Write-Host ""
 
-npm run start:win
+if (-not (Test-Path (Join-Path $Root "node_modules\next"))) {
+  Write-Host "next not installed. Run setup.ps1 first:" -ForegroundColor Red
+  Write-Host "  powershell -ExecutionPolicy Bypass -File .\scripts\windows\setup.ps1"
+  throw "Missing node_modules"
+}
+
+if (-not (Test-Path (Join-Path $Root ".next"))) {
+  Write-Host "No build found. Building..." -ForegroundColor Yellow
+  npm run build
+  if ($LASTEXITCODE -ne 0) { throw "build failed" }
+}
+
+npx --no-install next start -H 0.0.0.0 -p 8080
