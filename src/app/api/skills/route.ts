@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { error, json, requireAdmin, writeLog } from "@/lib/api";
-import type { Prisma } from "@prisma/client";
+import { asJsonObject, asStringArray } from "@/lib/utils";
 
 const skillSchema = z.object({
   name: z.string().min(1),
@@ -17,7 +17,13 @@ export async function GET() {
   const admin = await requireAdmin();
   if (admin instanceof Response) return admin;
   const skills = await prisma.skill.findMany({ orderBy: { name: "asc" } });
-  return json({ skills });
+  return json({
+    skills: skills.map((s) => ({
+      ...s,
+      tools: asStringArray(s.tools),
+      config: asJsonObject(s.config),
+    })),
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -30,9 +36,9 @@ export async function POST(req: NextRequest) {
         name: body.name,
         description: body.description,
         systemPrompt: body.systemPrompt ?? "",
-        tools: body.tools ?? [],
+        tools: JSON.stringify(body.tools ?? []),
         enabled: body.enabled ?? true,
-        config: (body.config ?? {}) as Prisma.InputJsonValue,
+        config: JSON.stringify(body.config ?? {}),
       },
     });
     await writeLog({

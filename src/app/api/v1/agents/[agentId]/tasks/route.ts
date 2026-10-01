@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { checkRateLimit, error, json, resolveApiKey, writeLog } from "@/lib/api";
 import { runTask } from "@/modules/tasks/runTask";
+import { asStringArray } from "@/lib/utils";
 
 type Params = { params: Promise<{ agentId: string }> };
 
@@ -24,7 +25,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   const key = await resolveApiKey(req.headers.get("authorization"));
   if (!key) return error("Invalid API key", 401);
   if (key.agentId && key.agentId !== agentId) return error("Forbidden", 403);
-  if (!key.scopes.includes("tasks") && !key.scopes.includes("*")) {
+  const scopes = asStringArray(key.scopes);
+  if (!scopes.includes("tasks") && !scopes.includes("*")) {
     return error("Insufficient scope", 403);
   }
   const rl = checkRateLimit(`apikey:${key.id}:tasks`, key.rateLimit);

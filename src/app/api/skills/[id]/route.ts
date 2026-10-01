@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { error, json, requireAdmin, writeLog } from "@/lib/api";
-import type { Prisma } from "@prisma/client";
+import { asStringArray, asJsonObject } from "@/lib/utils";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -21,12 +21,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { id } = await params;
   try {
     const body = updateSchema.parse(await req.json());
-    const { config, ...rest } = body;
+    const { config, tools, ...rest } = body;
     const skill = await prisma.skill.update({
       where: { id },
       data: {
         ...rest,
-        ...(config !== undefined ? { config: config as Prisma.InputJsonValue } : {}),
+        ...(tools !== undefined ? { tools: JSON.stringify(tools) } : {}),
+        ...(config !== undefined ? { config: JSON.stringify(config) } : {}),
       },
     });
     await writeLog({
@@ -34,7 +35,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       message: `Updated skill ${skill.name}`,
       userId: admin.id,
     });
-    return json({ skill });
+    return json({
+      skill: {
+        ...skill,
+        tools: asStringArray(skill.tools),
+        config: asJsonObject(skill.config),
+      },
+    });
   } catch (e) {
     if (e instanceof z.ZodError) return error(e.issues[0]?.message ?? "Invalid input");
     return error(e instanceof Error ? e.message : "Update failed", 500);

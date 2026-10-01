@@ -61,7 +61,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         sessionId: body.sessionId,
         role: "assistant",
         content: result.result || result.error || "No response",
-        metadata: { success: result.success, iterations: result.iterations },
+        metadata: JSON.stringify({ success: result.success, iterations: result.iterations }),
       },
     });
 

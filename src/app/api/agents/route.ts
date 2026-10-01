@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
       data: {
         agentId: agent.id,
         name: `${agent.name} Widget`,
-        config: { greeting: `Hi! I am ${agent.name}. How can I help?` },
+        config: JSON.stringify({ greeting: `Hi! I am ${agent.name}. How can I help?` }),
       },
     });
 

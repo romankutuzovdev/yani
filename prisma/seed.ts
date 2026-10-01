@@ -41,14 +41,14 @@ async function main() {
       where: { name: tool.name },
       update: {
         description: tool.description,
-        inputSchema: tool.inputSchema as Prisma.InputJsonValue,
+        inputSchema: JSON.stringify(tool.inputSchema),
         enabled: true,
         builtIn: true,
       },
       create: {
         name: tool.name,
         description: tool.description,
-        inputSchema: tool.inputSchema as Prisma.InputJsonValue,
+        inputSchema: JSON.stringify(tool.inputSchema),
         enabled: true,
         builtIn: true,
       },
@@ -85,8 +85,17 @@ async function main() {
   for (const skill of skills) {
     await prisma.skill.upsert({
       where: { name: skill.name },
-      update: skill,
-      create: skill,
+      update: {
+        description: skill.description,
+        systemPrompt: skill.systemPrompt,
+        tools: JSON.stringify(skill.tools),
+      },
+      create: {
+        name: skill.name,
+        description: skill.description,
+        systemPrompt: skill.systemPrompt,
+        tools: JSON.stringify(skill.tools),
+      },
     });
   }
 
@@ -200,7 +209,7 @@ async function main() {
       agentId: agent.id,
       name: "Alex Widget",
       enabled: true,
-      config: { greeting: "Привет! Я Alex. Чем могу помочь?" },
+      config: JSON.stringify({ greeting: "Привет! Я Alex. Чем могу помочь?" }),
     },
   });
 

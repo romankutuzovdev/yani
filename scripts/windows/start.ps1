@@ -1,4 +1,4 @@
-# Start Yani on Windows, port 8080
+# Start Yani on Windows, port 8080 (SQLite)
 # Encoding: ASCII only
 #
 #   powershell -ExecutionPolicy Bypass -File .\scripts\windows\start.ps1
@@ -25,10 +25,8 @@ if (Test-Path $envFile) {
 
 $env:PORT = "8080"
 $env:HOSTNAME = "0.0.0.0"
-
-if (Get-Command docker -ErrorAction SilentlyContinue) {
-  Write-Host "==> Ensuring Docker postgres (optional)..." -ForegroundColor Cyan
-  docker compose up -d postgres 2>$null | Out-Null
+if (-not $env:DATABASE_URL) {
+  $env:DATABASE_URL = "file:./data/yani.db"
 }
 
 Write-Host "==> Yani http://0.0.0.0:8080" -ForegroundColor Green

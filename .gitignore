@@ -38,6 +38,11 @@ yarn-error.log*
 /uploads
 /uploads/**
 
+# sqlite
+/data
+*.db
+*.db-journal
+
 # vercel
 .vercel
 

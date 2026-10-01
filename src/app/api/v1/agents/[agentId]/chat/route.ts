@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { checkRateLimit, error, json, resolveApiKey, writeLog } from "@/lib/api";
 import { agentEngine } from "@/agent/AgentEngine";
 import { writeMemory } from "@/memory";
+import { asStringArray } from "@/lib/utils";
 
 type Params = { params: Promise<{ agentId: string }> };
 
@@ -38,7 +39,8 @@ async function authAgent(req: NextRequest, agentId: string) {
   if (key.agentId && key.agentId !== agentId) {
     return { error: error("API key not allowed for this agent", 403) };
   }
-  if (!key.scopes.includes("chat") && !key.scopes.includes("*")) {
+  const scopes = asStringArray(key.scopes);
+  if (!scopes.includes("chat") && !scopes.includes("*")) {
     return { error: error("Insufficient scope", 403) };
   }
   const rl = checkRateLimit(`apikey:${key.id}`, key.rateLimit);

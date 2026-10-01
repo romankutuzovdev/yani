@@ -111,7 +111,7 @@ export default function SkillsPage() {
                 <h3 className="text-lg font-medium text-slate-900">{skill.name}</h3>
                 <p className="mt-1 text-sm text-slate-500">{skill.description}</p>
                 <p className="mt-2 text-xs text-slate-500">
-                  Инструменты: {skill.tools.join(", ") || "нет"}
+                  Инструменты: {(Array.isArray(skill.tools) ? skill.tools : []).join(", ") || "нет"}
                 </p>
               </div>
               <span className="text-xs uppercase text-slate-500">

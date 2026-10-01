@@ -1,8 +1,9 @@
 import { prisma } from "@/lib/db";
+import { asStringArray, jsonString } from "@/lib/utils";
 import { createLLMProvider, type LLMProvider, type LLMToolDefinition, type Message } from "@/llm";
 import { ensureToolsRegistered, getTool, getToolsByNames, listTools, type AgentTool } from "@/tools";
 import { registerMemoryTool, formatMemoryForPrompt, getRelevantMemory, writeMemory } from "@/memory";
-import type { Agent, AgentStatus, Prisma, Skill } from "@prisma/client";
+import type { Agent, AgentStatus, Skill } from "@prisma/client";
 
 export interface AgentEngineLimits {
   maxIterations: number;
@@ -131,7 +132,7 @@ export class AgentEngine {
             executionId: input.executionId,
             type,
             summary,
-            data: (data as Prisma.InputJsonValue) ?? {},
+            data: jsonString(data ?? {}, "{}"),
           },
         });
       }
@@ -157,7 +158,7 @@ export class AgentEngine {
         skills = skills.filter((s) => input.skillIds!.includes(s.id));
       }
 
-      const skillToolNames = skills.flatMap((s) => s.tools);
+      const skillToolNames = skills.flatMap((s) => asStringArray(s.tools));
       const agentToolNames = agent.tools.filter((t) => t.tool.enabled).map((t) => t.tool.name);
       const requested = input.toolNames?.length
         ? input.toolNames

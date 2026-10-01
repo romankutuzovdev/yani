@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { error, json, requireAdmin, writeLog } from "@/lib/api";
-import { generateApiKey } from "@/lib/utils";
+import { generateApiKey, asStringArray } from "@/lib/utils";
 
 export async function GET() {
   const admin = await requireAdmin();
@@ -21,7 +21,9 @@ export async function GET() {
       createdAt: true,
     },
   });
-  return json({ keys });
+  return json({
+    keys: keys.map((k) => ({ ...k, scopes: asStringArray(k.scopes) })),
+  });
 }
 
 const createSchema = z.object({
@@ -42,7 +44,7 @@ export async function POST(req: NextRequest) {
         name: body.name,
         keyHash: generated.hash,
         keyPrefix: generated.prefix,
-        scopes: body.scopes ?? ["chat", "tasks", "status"],
+        scopes: JSON.stringify(body.scopes ?? ["chat", "tasks", "status"]),
         rateLimit: body.rateLimit ?? 60,
         agentId: body.agentId ?? null,
         userId: admin.id,
@@ -58,7 +60,7 @@ export async function POST(req: NextRequest) {
         id: key.id,
         name: key.name,
         keyPrefix: key.keyPrefix,
-        scopes: key.scopes,
+        scopes: asStringArray(key.scopes),
         rateLimit: key.rateLimit,
         agentId: key.agentId,
         createdAt: key.createdAt,

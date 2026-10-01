@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import type { MemoryType, Prisma } from "@prisma/client";
+import type { MemoryType } from "@prisma/client";
 import { fail, ok, type AgentTool } from "@/tools/types";
 import { registerTool } from "@/tools";
 
@@ -20,7 +20,7 @@ export async function writeMemory(input: MemoryWriteInput) {
       type: input.type ?? "SHORT_TERM",
       userId: input.userId,
       taskId: input.taskId,
-      metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
+      metadata: JSON.stringify(input.metadata ?? {}),
     },
   });
 }
@@ -39,7 +39,7 @@ export async function searchMemory(opts: {
       agentId: opts.agentId,
       ...(opts.type ? { type: opts.type } : {}),
       ...(opts.userId ? { userId: opts.userId } : {}),
-      content: { contains: opts.query, mode: "insensitive" },
+      content: { contains: opts.query },
     },
     orderBy: { createdAt: "desc" },
     take: limit,

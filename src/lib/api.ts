@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, type SessionUser } from "@/lib/auth";
 import { hashApiKey } from "@/lib/utils";
-import type { LogLevel, Prisma } from "@prisma/client";
+import type { LogLevel } from "@prisma/client";
 
 export function json<T>(data: T, init?: ResponseInit) {
   return NextResponse.json(data, init);
@@ -60,7 +60,7 @@ export async function writeLog(opts: {
         agentId: opts.agentId,
         taskId: opts.taskId,
         userId: opts.userId,
-        meta: (opts.meta ?? {}) as Prisma.InputJsonValue,
+        meta: JSON.stringify(opts.meta ?? {}),
       },
     });
   } catch {

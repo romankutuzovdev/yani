@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { agentEngine } from "@/agent/AgentEngine";
 import { writeLog } from "@/lib/api";
+import { asStringArray } from "@/lib/utils";
 
 export async function runTask(taskId: string) {
   const task = await prisma.task.findUnique({ where: { id: taskId } });
@@ -20,8 +21,8 @@ export async function runTask(taskId: string) {
     instruction: task.instruction,
     taskId: task.id,
     executionId: execution.id,
-    skillIds: task.skillIds,
-    toolNames: task.toolNames,
+    skillIds: asStringArray(task.skillIds),
+    toolNames: asStringArray(task.toolNames),
     limits: {
       maxIterations: task.maxIterations,
       timeoutMs: task.maxDurationMs,

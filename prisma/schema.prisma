@@ -157,9 +157,9 @@ model Skill {
   name         String   @unique
   description  String
   systemPrompt String   @default("")
-  tools        Json     @default("[]")
+  tools        String @default("[]")
   enabled      Boolean  @default(true)
-  config       Json     @default("{}")
+  config       String @default("{}")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   agents       AgentSkill[]
@@ -180,9 +180,9 @@ model ToolRegistry {
   id          String   @id @default(cuid())
   name        String   @unique
   description String
-  inputSchema Json
+  inputSchema String @default("{}")
   enabled     Boolean  @default(true)
-  config      Json     @default("{}")
+  config      String @default("{}")
   builtIn     Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -193,7 +193,7 @@ model AgentTool {
   agentId String
   toolId  String
   enabled Boolean @default(true)
-  config  Json    @default("{}")
+  config  String @default("{}")
 
   agent Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
   tool  ToolRegistry @relation(fields: [toolId], references: [id], onDelete: Cascade)
@@ -213,8 +213,8 @@ model Task {
   cronExpression String?
   maxDurationMs  Int        @default(120000)
   maxIterations  Int        @default(10)
-  skillIds       Json       @default("[]")
-  toolNames      Json       @default("[]")
+  skillIds       String @default("[]")
+  toolNames      String @default("[]")
   result         String?
   error          String?
   startedAt      DateTime?
@@ -254,7 +254,7 @@ model ExecutionEvent {
   executionId String
   type        String
   summary     String
-  data        Json     @default("{}")
+  data        String @default("{}")
   createdAt   DateTime @default(now())
 
   execution TaskExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
@@ -269,7 +269,7 @@ model Memory {
   taskId    String?
   type      MemoryType @default(SHORT_TERM)
   content   String
-  metadata  Json       @default("{}")
+  metadata  String @default("{}")
   createdAt DateTime   @default(now())
 
   agent Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
@@ -286,7 +286,7 @@ model ChatMessage {
   sessionId String
   role      String
   content   String
-  metadata  Json     @default("{}")
+  metadata  String @default("{}")
   createdAt DateTime @default(now())
 
   agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
@@ -299,7 +299,7 @@ model ApiKey {
   name       String
   keyHash    String
   keyPrefix  String
-  scopes     Json      @default("[\"chat\",\"tasks\",\"status\"]")
+  scopes     String    @default("[\"chat\",\"tasks\",\"status\"]")
   rateLimit  Int       @default(60)
   userId     String
   agentId    String?
@@ -319,7 +319,7 @@ model Widget {
   agentId   String
   name      String   @default("Default Widget")
   enabled   Boolean  @default(true)
-  config    Json     @default("{}")
+  config    String @default("{}")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -354,7 +354,7 @@ model SystemLog {
   agentId   String?
   taskId    String?
   userId    String?
-  meta      Json     @default("{}")
+  meta      String @default("{}")
   createdAt DateTime @default(now())
 
   agent Agent? @relation(fields: [agentId], references: [id], onDelete: SetNull)

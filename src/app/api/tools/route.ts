@@ -2,7 +2,7 @@ import { prisma } from "@/lib/db";
 import { json, requireAdmin } from "@/lib/api";
 import { ensureToolsRegistered, listTools } from "@/tools";
 import { registerMemoryTool } from "@/memory";
-import type { Prisma } from "@prisma/client";
+import { asJsonObject } from "@/lib/utils";
 
 export async function GET() {
   const admin = await requireAdmin();
@@ -16,17 +16,23 @@ export async function GET() {
       where: { name: tool.name },
       update: {
         description: tool.description,
-        inputSchema: tool.inputSchema as Prisma.InputJsonValue,
+        inputSchema: JSON.stringify(tool.inputSchema),
       },
       create: {
         name: tool.name,
         description: tool.description,
-        inputSchema: tool.inputSchema as Prisma.InputJsonValue,
+        inputSchema: JSON.stringify(tool.inputSchema),
         builtIn: true,
       },
     });
   }
 
   const tools = await prisma.toolRegistry.findMany({ orderBy: { name: "asc" } });
-  return json({ tools });
+  return json({
+    tools: tools.map((t) => ({
+      ...t,
+      inputSchema: asJsonObject(t.inputSchema),
+      config: asJsonObject(t.config),
+    })),
+  });
 }
