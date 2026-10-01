@@ -1,0 +1,367 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  USER
+  API_CLIENT
+}
+
+enum AgentStatus {
+  OFFLINE
+  ONLINE
+  IDLE
+  THINKING
+  WORKING
+  WAITING
+  SUCCESS
+  ERROR
+}
+
+enum CharacterState {
+  IDLE
+  THINKING
+  WORKING
+  SUCCESS
+  ERROR
+  SPEAKING
+  WAITING
+  SAD
+  ANGRY
+}
+
+enum AssetType {
+  IMAGE
+  GIF
+  WEBP
+  LOTTIE
+  VIDEO
+  SPRITE
+}
+
+enum TaskStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum MemoryType {
+  SHORT_TERM
+  LONG_TERM
+  TASK
+  USER
+  AGENT
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         Role      @default(USER)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  agents       Agent[]
+  apiKeys      ApiKey[]
+  memories     Memory[]  @relation("UserMemories")
+  logs         SystemLog[]
+}
+
+model Agent {
+  id             String        @id @default(cuid())
+  name           String
+  slug           String        @unique
+  description    String        @default("")
+  personality    String        @default("friendly")
+  role           String        @default("AI assistant")
+  communicationStyle String    @default("clear and helpful")
+  rules          String        @default("")
+  goals          String        @default("")
+  restrictions   String        @default("")
+  additionalInstructions String @default("") @db.Text
+  systemPrompt   String        @default("") @db.Text
+  model          String        @default("deepseek-chat")
+  temperature    Float         @default(0.7)
+  maxIterations  Int           @default(10)
+  maxTokens      Int           @default(4096)
+  timeoutMs      Int           @default(120000)
+  status         AgentStatus   @default(IDLE)
+  statusMessage  String        @default("")
+  enabled        Boolean       @default(true)
+  ownerId        String
+  characterId    String?       @unique
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  owner      User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  character  AgentCharacter? @relation(fields: [characterId], references: [id], onDelete: SetNull)
+  skills     AgentSkill[]
+  tools      AgentTool[]
+  tasks      Task[]
+  memories   Memory[]
+  apiKeys    ApiKey[]
+  widgets    Widget[]
+  usage      UsageRecord[]
+  logs       SystemLog[]
+  chats      ChatMessage[]
+
+  @@index([ownerId])
+  @@index([status])
+}
+
+model AgentCharacter {
+  id           String         @id @default(cuid())
+  name         String
+  description  String         @default("")
+  defaultState CharacterState @default(IDLE)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  assets       CharacterAsset[]
+  agent        Agent?
+}
+
+model CharacterAsset {
+  id          String         @id @default(cuid())
+  characterId String
+  state       CharacterState
+  type        AssetType      @default(IMAGE)
+  url         String
+  mimeType    String
+  filename    String
+  sizeBytes   Int            @default(0)
+  createdAt   DateTime       @default(now())
+
+  character AgentCharacter @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, state])
+  @@index([characterId])
+}
+
+model Skill {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String
+  systemPrompt String   @default("") @db.Text
+  tools        String[] @default([])
+  enabled      Boolean  @default(true)
+  config       Json     @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  agents       AgentSkill[]
+}
+
+model AgentSkill {
+  agentId String
+  skillId String
+  enabled Boolean @default(true)
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, skillId])
+}
+
+model ToolRegistry {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String
+  inputSchema Json
+  enabled     Boolean  @default(true)
+  config      Json     @default("{}")
+  builtIn     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  agents      AgentTool[]
+}
+
+model AgentTool {
+  agentId String
+  toolId  String
+  enabled Boolean @default(true)
+  config  Json    @default("{}")
+
+  agent Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  tool  ToolRegistry @relation(fields: [toolId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, toolId])
+}
+
+model Task {
+  id             String     @id @default(cuid())
+  agentId        String
+  title          String
+  description    String     @default("")
+  instruction    String     @db.Text
+  priority       Int        @default(0)
+  status         TaskStatus @default(PENDING)
+  scheduledAt    DateTime?
+  cronExpression String?
+  maxDurationMs  Int        @default(120000)
+  maxIterations  Int        @default(10)
+  skillIds       String[]   @default([])
+  toolNames      String[]   @default([])
+  result         String?    @db.Text
+  error          String?    @db.Text
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  agent      Agent           @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  executions TaskExecution[]
+  memories   Memory[]
+  logs       SystemLog[]
+
+  @@index([agentId, status])
+  @@index([scheduledAt])
+}
+
+model TaskExecution {
+  id         String     @id @default(cuid())
+  taskId     String
+  status     TaskStatus @default(RUNNING)
+  summary    String     @default("") @db.Text
+  result     String?    @db.Text
+  error      String?    @db.Text
+  iterations Int        @default(0)
+  startedAt  DateTime   @default(now())
+  finishedAt DateTime?
+  cancelled  Boolean    @default(false)
+
+  task   Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  events ExecutionEvent[]
+
+  @@index([taskId])
+}
+
+model ExecutionEvent {
+  id          String   @id @default(cuid())
+  executionId String
+  type        String
+  summary     String
+  data        Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  execution TaskExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, createdAt])
+}
+
+model Memory {
+  id        String     @id @default(cuid())
+  agentId   String
+  userId    String?
+  taskId    String?
+  type      MemoryType @default(SHORT_TERM)
+  content   String     @db.Text
+  metadata  Json       @default("{}")
+  createdAt DateTime   @default(now())
+
+  agent Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user  User?  @relation("UserMemories", fields: [userId], references: [id], onDelete: SetNull)
+  task  Task?  @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([agentId, type, createdAt])
+  @@index([agentId, userId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  agentId   String
+  sessionId String
+  role      String
+  content   String   @db.Text
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, sessionId, createdAt])
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  name       String
+  keyHash    String
+  keyPrefix  String
+  scopes     String[]  @default(["chat", "tasks", "status"])
+  rateLimit  Int       @default(60)
+  userId     String
+  agentId    String?
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent Agent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@index([keyPrefix])
+  @@index([userId])
+}
+
+model Widget {
+  id        String   @id @default(cuid())
+  agentId   String
+  name      String   @default("Default Widget")
+  enabled   Boolean  @default(true)
+  config    Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+}
+
+model UsageRecord {
+  id           String   @id @default(cuid())
+  agentId      String?
+  provider     String
+  model        String
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  totalTokens  Int      @default(0)
+  estimatedCost Float   @default(0)
+  requestType  String   @default("chat")
+  createdAt    DateTime @default(now())
+
+  agent Agent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@index([agentId, createdAt])
+  @@index([createdAt])
+}
+
+model SystemLog {
+  id        String   @id @default(cuid())
+  level     LogLevel @default(INFO)
+  type      String
+  message   String   @db.Text
+  agentId   String?
+  taskId    String?
+  userId    String?
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  agent Agent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  task  Task?  @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  user  User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([level, createdAt])
+  @@index([agentId, createdAt])
+  @@index([type, createdAt])
+}
