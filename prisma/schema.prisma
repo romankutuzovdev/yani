@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -93,8 +93,8 @@ model Agent {
   rules          String        @default("")
   goals          String        @default("")
   restrictions   String        @default("")
-  additionalInstructions String @default("") @db.Text
-  systemPrompt   String        @default("") @db.Text
+  additionalInstructions String @default("")
+  systemPrompt   String        @default("")
   model          String        @default("deepseek-chat")
   temperature    Float         @default(0.7)
   maxIterations  Int           @default(10)
@@ -156,8 +156,8 @@ model Skill {
   id           String   @id @default(cuid())
   name         String   @unique
   description  String
-  systemPrompt String   @default("") @db.Text
-  tools        String[] @default([])
+  systemPrompt String   @default("")
+  tools        Json     @default("[]")
   enabled      Boolean  @default(true)
   config       Json     @default("{}")
   createdAt    DateTime @default(now())
@@ -206,17 +206,17 @@ model Task {
   agentId        String
   title          String
   description    String     @default("")
-  instruction    String     @db.Text
+  instruction    String
   priority       Int        @default(0)
   status         TaskStatus @default(PENDING)
   scheduledAt    DateTime?
   cronExpression String?
   maxDurationMs  Int        @default(120000)
   maxIterations  Int        @default(10)
-  skillIds       String[]   @default([])
-  toolNames      String[]   @default([])
-  result         String?    @db.Text
-  error          String?    @db.Text
+  skillIds       Json       @default("[]")
+  toolNames      Json       @default("[]")
+  result         String?
+  error          String?
   startedAt      DateTime?
   finishedAt     DateTime?
   createdAt      DateTime   @default(now())
@@ -235,9 +235,9 @@ model TaskExecution {
   id         String     @id @default(cuid())
   taskId     String
   status     TaskStatus @default(RUNNING)
-  summary    String     @default("") @db.Text
-  result     String?    @db.Text
-  error      String?    @db.Text
+  summary    String     @default("")
+  result     String?
+  error      String?
   iterations Int        @default(0)
   startedAt  DateTime   @default(now())
   finishedAt DateTime?
@@ -268,7 +268,7 @@ model Memory {
   userId    String?
   taskId    String?
   type      MemoryType @default(SHORT_TERM)
-  content   String     @db.Text
+  content   String
   metadata  Json       @default("{}")
   createdAt DateTime   @default(now())
 
@@ -285,7 +285,7 @@ model ChatMessage {
   agentId   String
   sessionId String
   role      String
-  content   String   @db.Text
+  content   String
   metadata  Json     @default("{}")
   createdAt DateTime @default(now())
 
@@ -299,7 +299,7 @@ model ApiKey {
   name       String
   keyHash    String
   keyPrefix  String
-  scopes     String[]  @default(["chat", "tasks", "status"])
+  scopes     Json      @default("[\"chat\",\"tasks\",\"status\"]")
   rateLimit  Int       @default(60)
   userId     String
   agentId    String?
@@ -350,7 +350,7 @@ model SystemLog {
   id        String   @id @default(cuid())
   level     LogLevel @default(INFO)
   type      String
-  message   String   @db.Text
+  message   String
   agentId   String?
   taskId    String?
   userId    String?
