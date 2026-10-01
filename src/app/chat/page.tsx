@@ -319,14 +319,17 @@ export default function ClientChatPage() {
             )}
 
             {/* Skills */}
-            <div className="mt-5 w-full sm:mt-8">
-              <div className="mb-2.5 flex items-center justify-between px-0.5 sm:mb-3 sm:px-1">
-                <p className="text-xs font-medium text-slate-500 sm:text-sm">Навыки</p>
+            <div className="mt-3 w-full sm:mt-5">
+              <div className="relative mb-2.5 sm:mb-3">
+                <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-slate-400 sm:text-sm">
+                  <Sparkles size={14} className="text-slate-400" />
+                  Навыки
+                </p>
                 {activeSkillId && (
                   <button
                     type="button"
                     onClick={() => setActiveSkillId(null)}
-                    className="text-xs text-yani-ink active:underline"
+                    className="absolute right-0 top-1/2 -translate-y-1/2 text-xs text-yani-ink active:underline"
                   >
                     Все навыки
                   </button>
