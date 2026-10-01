@@ -1,5 +1,6 @@
-# Старт Yani на Windows, порт 8080
-# Запуск:
+# Start Yani on Windows, port 8080
+# Encoding: ASCII only
+#
 #   powershell -ExecutionPolicy Bypass -File .\scripts\windows\start.ps1
 
 $ErrorActionPreference = "Stop"
@@ -9,7 +10,6 @@ if (-not (Test-Path (Join-Path $Root "package.json"))) {
 }
 Set-Location $Root
 
-# Подтянуть .env в процесс
 $envFile = Join-Path $Root ".env"
 if (Test-Path $envFile) {
   Get-Content $envFile | ForEach-Object {
@@ -26,12 +26,14 @@ if (Test-Path $envFile) {
 $env:PORT = "8080"
 $env:HOSTNAME = "0.0.0.0"
 
-Write-Host "==> Проверка Docker (postgres/redis)..." -ForegroundColor Cyan
-docker compose up -d postgres redis | Out-Null
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+  Write-Host "==> Ensuring Docker postgres (optional)..." -ForegroundColor Cyan
+  docker compose up -d postgres 2>$null | Out-Null
+}
 
-Write-Host "==> Yani слушает http://0.0.0.0:8080" -ForegroundColor Green
-Write-Host "    Чат:     http://localhost:8080/chat"
-Write-Host "    Админка: http://localhost:8080/login"
+Write-Host "==> Yani http://0.0.0.0:8080" -ForegroundColor Green
+Write-Host "    Chat:  http://91.149.133.54:8080/chat"
+Write-Host "    Admin: http://91.149.133.54:8080/login"
 Write-Host ""
 
 npm run start:win

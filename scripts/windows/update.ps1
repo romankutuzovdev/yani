@@ -1,9 +1,7 @@
-# Обновление Yani с GitHub + пересборка
-# Запуск:
-#   powershell -ExecutionPolicy Bypass -File .\scripts\windows\update.ps1
+# Update Yani from GitHub + rebuild
+# Encoding: ASCII only
 #
-# Для автообновления: Планировщик заданий Windows → каждые 5 минут → этот скрипт.
-# (приложение должно крутиться отдельно через start.ps1 / NSSM / pm2)
+#   powershell -ExecutionPolicy Bypass -File .\scripts\windows\update.ps1
 
 param(
   [string]$Branch = "main"
@@ -22,11 +20,11 @@ $local = (git rev-parse HEAD).Trim()
 $remote = (git rev-parse "origin/$Branch").Trim()
 
 if ($local -eq $remote) {
-  Write-Host "==> Уже актуально ($local)" -ForegroundColor Green
+  Write-Host "==> Already up to date ($local)" -ForegroundColor Green
   exit 0
 }
 
-Write-Host "==> Есть обновления: $local -> $remote" -ForegroundColor Yellow
+Write-Host "==> Updating $local -> $remote" -ForegroundColor Yellow
 git pull origin $Branch
 
 Write-Host "==> npm install..." -ForegroundColor Cyan
@@ -39,9 +37,7 @@ Write-Host "==> build..." -ForegroundColor Cyan
 npm run build
 
 Write-Host ""
-Write-Host "Сборка обновлена. Перезапусти приложение:" -ForegroundColor Green
-Write-Host "  1) Останови текущий npm/node (Ctrl+C в окне start.ps1)"
-Write-Host "  2) powershell -ExecutionPolicy Bypass -File .\scripts\windows\start.ps1"
+Write-Host "Rebuild done. Restart the app:" -ForegroundColor Green
+Write-Host "  Ctrl+C in start window, then:"
+Write-Host "  powershell -ExecutionPolicy Bypass -File .\scripts\windows\start.ps1"
 Write-Host ""
-Write-Host "Если используешь pm2:" -ForegroundColor Cyan
-Write-Host "  pm2 restart yani"
