@@ -47,8 +47,12 @@ Open:
 
 ## Update later
 
+Сначала остановите приложение (**Ctrl+C** в окне `start.ps1`), иначе Windows залочит `query_engine-windows.dll.node` и Prisma упадёт с `EPERM`.
+
 ```powershell
 cd C:\apps\yani
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\update.ps1
-# Ctrl+C in start window, then start.ps1 again
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\start.ps1
 ```
+
+`update.ps1` сам попытается освободить порт **8080**. Если `EPERM` всё равно есть — закройте все окна Node/Next и повторите.
