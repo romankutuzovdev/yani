@@ -54,13 +54,12 @@ export default function AdminDashboardPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Обзор</h1>
-        <p className="mt-1 text-slate-500">Агенты, задачи и использование LLM</p>
+        <p className="mt-1 text-slate-500">Агенты, навыки и использование LLM</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
           ["Агенты", stats?.agents, "/admin/agents"],
-          ["Задачи", stats?.tasks, "/admin/tasks"],
           ["Навыки", stats?.skills, "/admin/skills"],
           ["Инструменты", stats?.tools, "/admin/tools"],
           ["Запросов сегодня", stats?.todayRequests],

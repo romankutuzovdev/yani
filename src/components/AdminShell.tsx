@@ -12,7 +12,6 @@ import {
   Settings,
   Sparkles,
   Wrench,
-  ListTodo,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,7 +19,6 @@ const NAV = [
   { href: "/admin", label: "Обзор", icon: LayoutDashboard },
   { href: "/admin/agents", label: "Агенты", icon: Bot },
   { href: "/admin/forms", label: "Формы", icon: ClipboardList },
-  { href: "/admin/tasks", label: "Задачи", icon: ListTodo },
   { href: "/admin/skills", label: "Навыки", icon: Sparkles },
   { href: "/admin/tools", label: "Инструменты", icon: Wrench },
   { href: "/admin/api-keys", label: "API-ключи", icon: KeyRound },
