@@ -38,16 +38,14 @@ export default function LoginPage() {
         className="w-full max-w-md rounded-3xl border border-violet-100 bg-white p-8 shadow-lg"
       >
         <div className="flex flex-col items-center text-center">
-          <div className="rounded-2xl bg-slate-950 px-4 py-3">
-            <Image
-              src="/brand/yani-logo.png"
-              alt="YANI"
-              width={160}
-              height={56}
-              className="h-12 w-auto object-contain"
-              priority
-            />
-          </div>
+          <Image
+            src="/brand/yani-logo.png"
+            alt="YANI"
+            width={160}
+            height={56}
+            className="h-12 w-auto object-contain"
+            priority
+          />
           <p className="mt-4 text-sm text-slate-500">Вход в админ-панель</p>
         </div>
         <label className="mt-8 block text-sm text-slate-700">

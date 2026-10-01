@@ -34,7 +34,8 @@
     ".yani-panel{position:fixed;right:20px;bottom:88px;z-index:2147483000;width:340px;max-width:calc(100vw - 24px);height:520px;max-height:calc(100vh - 120px);border-radius:20px;overflow:hidden;background:#0b1220;color:#e2e8f0;box-shadow:0 25px 80px rgba(0,0,0,.45);display:none;flex-direction:column;font:14px/1.45 system-ui,sans-serif;border:1px solid rgba(255,255,255,.08)}" +
     ".yani-panel.open{display:flex}" +
     ".yani-head{padding:14px 16px;background:linear-gradient(180deg,rgba(34,211,238,.15),transparent);display:flex;gap:12px;align-items:center}" +
-    ".yani-avatar{width:48px;height:48px;border-radius:999px;object-fit:cover;background:#1e293b;border:1px solid rgba(34,211,238,.25)}" +
+    ".yani-avatar{width:48px;height:48px;border-radius:999px;object-fit:contain;background:transparent;border:1px solid rgba(34,211,238,.25);display:block}" +
+    ".yani-avatar-wrap{width:48px;height:48px;border-radius:999px;overflow:hidden;flex-shrink:0}" +
     ".yani-title{font-weight:650;margin:0}" +
     ".yani-sub{margin:2px 0 0;font-size:12px;color:#94a3b8}" +
     ".yani-msgs{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px}" +
@@ -50,7 +51,7 @@
     '<button class="yani-fab" type="button" aria-label="Open chat">AI</button>' +
     '<div class="yani-panel" role="dialog" aria-label="AI agent widget">' +
     '  <div class="yani-head">' +
-    '    <img class="yani-avatar" alt="" />' +
+    '    <div class="yani-avatar-wrap"><img class="yani-avatar" alt="" /></div>' +
     "    <div><p class=\"yani-title\">Agent</p><p class=\"yani-sub\">Online</p></div>" +
     "  </div>" +
     '  <div class="yani-msgs"></div>' +
@@ -68,6 +69,7 @@
   var title = root.querySelector(".yani-title");
   var sub = root.querySelector(".yani-sub");
   var avatar = root.querySelector(".yani-avatar");
+  var avatarWrap = root.querySelector(".yani-avatar-wrap");
   var sessionId = "widget-" + Math.random().toString(36).slice(2);
 
   fab.addEventListener("click", function () {
@@ -104,14 +106,31 @@
     return found;
   }
 
+  function isVideoAsset(asset) {
+    if (!asset) return false;
+    if (asset.type === "VIDEO") return true;
+    if (asset.mimeType && String(asset.mimeType).indexOf("video/") === 0) return true;
+    return /\.(webm|mp4|ogv|ogg)(\?|$)/i.test(asset.url || "");
+  }
+
+  function setAvatar(asset) {
+    if (!asset || !asset.url || !avatarWrap) return;
+    var src = asset.url.startsWith("http") ? asset.url : base + asset.url;
+    if (isVideoAsset(asset)) {
+      avatarWrap.innerHTML =
+        '<video class="yani-avatar" src="' +
+        src +
+        '" autoplay loop muted playsinline></video>';
+    } else {
+      avatarWrap.innerHTML = '<img class="yani-avatar" alt="" src="' + src + '" />';
+    }
+    avatar = root.querySelector(".yani-avatar");
+  }
+
   function applyAgent(agent) {
     title.textContent = agent.name || "Agent";
     sub.textContent = (agent.statusMessage || agent.status || "idle").toString();
-    var asset = pickAsset(agent, agent.status);
-    if (asset && asset.url) {
-      avatar.src = asset.url.startsWith("http") ? asset.url : base + asset.url;
-      avatar.style.display = "block";
-    }
+    setAvatar(pickAsset(agent, agent.status));
     var greeting =
       (agent.widget && agent.widget.config && agent.widget.config.greeting) ||
       "Hi! How can I help?";

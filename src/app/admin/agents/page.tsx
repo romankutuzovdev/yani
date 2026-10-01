@@ -90,7 +90,7 @@ export default function AgentsPage() {
                   <img
                     src={agent.logoUrl}
                     alt=""
-                    className="h-10 w-10 rounded-xl object-contain bg-slate-950 p-1"
+                    className="h-10 w-10 rounded-xl object-contain bg-violet-50 p-1"
                   />
                 ) : (
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-sm font-semibold text-violet-700">

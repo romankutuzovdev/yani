@@ -281,7 +281,7 @@ export default function AgentDetailPage() {
               <div>
                 <h2 className="font-medium">Галерея эмоций</h2>
                 <p className="text-xs text-slate-500">
-                  Клик — превью · загрузка — заменить
+                  Картинка или web-видео (WebM / MP4 / Ogg), до 50 МБ
                 </p>
               </div>
               {previewState && (
@@ -298,6 +298,10 @@ export default function AgentDetailPage() {
               {STATES.map((state) => {
                 const asset = agent.character?.assets.find((a) => a.state === state);
                 const active = previewState === state;
+                const isVideo =
+                  asset?.type === "VIDEO" ||
+                  asset?.mimeType?.startsWith("video/") ||
+                  /\.(webm|mp4|ogv|ogg)(\?|$)/i.test(asset?.url ?? "");
                 return (
                   <div
                     key={state}
@@ -314,27 +318,40 @@ export default function AgentDetailPage() {
                     >
                       <p className="text-xs uppercase tracking-wide text-slate-500">
                         {STATE_LABELS[state]}
+                        {isVideo ? " · видео" : ""}
                       </p>
                       {asset ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={asset.url}
-                          alt={state}
-                          className="mx-auto mt-2 h-24 w-24 rounded-xl object-cover"
-                        />
+                        isVideo ? (
+                          <video
+                            src={asset.url}
+                            className="mx-auto mt-2 h-24 w-24 rounded-xl object-contain"
+                            muted
+                            loop
+                            autoPlay
+                            playsInline
+                          />
+                        ) : (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={asset.url}
+                            alt={state}
+                            className="mx-auto mt-2 h-24 w-24 rounded-xl object-contain"
+                          />
+                        )
                       ) : (
-                        <p className="mt-6 text-xs text-slate-500">Нет картинки</p>
+                        <p className="mt-6 text-xs text-slate-500">Нет медиа</p>
                       )}
                     </button>
                     <label className="mt-2 inline-block cursor-pointer text-[11px] text-violet-600/70 hover:text-violet-700">
-                      Заменить
+                      Загрузить
                       <input
                         type="file"
-                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        accept="image/png,image/jpeg,image/webp,image/gif,video/webm,video/mp4,video/ogg"
                         className="hidden"
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) void upload(state, file);
+                          e.target.value = "";
                         }}
                       />
                     </label>

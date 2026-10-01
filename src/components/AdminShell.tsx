@@ -49,7 +49,7 @@ export function AdminShell({
       <div className="mx-auto flex min-h-screen max-w-[1400px]">
         <aside className="hidden w-64 shrink-0 border-r border-violet-100 bg-white/70 p-5 backdrop-blur md:block">
           <div className="mb-8">
-            <Link href="/admin" className="block rounded-2xl bg-slate-950 px-3 py-2">
+            <Link href="/admin" className="block px-1 py-1">
               <Image
                 src="/brand/yani-logo.png"
                 alt="YANI"

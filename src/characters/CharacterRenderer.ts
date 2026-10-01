@@ -7,6 +7,13 @@ export type CharacterAssetView = {
   mimeType: string;
 };
 
+export function isVideoAsset(asset: Pick<CharacterAssetView, "type" | "mimeType" | "url"> | null | undefined) {
+  if (!asset) return false;
+  if (asset.type === "VIDEO") return true;
+  if (asset.mimeType?.startsWith("video/")) return true;
+  return /\.(webm|mp4|ogv|ogg)(\?|$)/i.test(asset.url);
+}
+
 export interface CharacterRendererProps {
   assets: CharacterAssetView[];
   state: CharacterState;

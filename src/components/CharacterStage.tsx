@@ -1,14 +1,73 @@
 "use client";
 
 import Image from "next/image";
+import { useEffect, useRef } from "react";
 import {
   agentStatusToCharacterState,
+  isVideoAsset,
   resolveCharacterAsset,
   STATE_LABELS,
   type CharacterAssetView,
 } from "@/characters/CharacterRenderer";
 import type { CharacterState } from "@prisma/client";
 import { cn } from "@/lib/utils";
+
+function CharacterMedia({
+  asset,
+  name,
+  state,
+}: {
+  asset: CharacterAssetView;
+  name: string;
+  state: CharacterState;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const video = isVideoAsset(asset);
+
+  useEffect(() => {
+    if (!video) return;
+    const el = videoRef.current;
+    if (!el) return;
+    el.load();
+    void el.play().catch(() => undefined);
+  }, [video, asset.url, state]);
+
+  if (video) {
+    return (
+      <video
+        ref={videoRef}
+        key={asset.url}
+        src={asset.url}
+        className={cn(
+          "absolute inset-0 h-full w-full object-contain transition-all duration-500",
+          state === "WORKING" && "scale-105",
+        )}
+        autoPlay
+        loop
+        muted
+        playsInline
+        preload="auto"
+        aria-label={`${name} — ${STATE_LABELS[state]}`}
+      />
+    );
+  }
+
+  return (
+    <Image
+      src={asset.url}
+      alt={`${name} — ${STATE_LABELS[state]}`}
+      fill
+      unoptimized
+      className={cn(
+        "object-contain transition-all duration-500",
+        state === "THINKING" && "animate-pulse",
+        state === "WORKING" && "scale-105",
+        state === "SUCCESS" && "brightness-110",
+        (state === "ERROR" || state === "SAD" || state === "ANGRY") && "grayscale-[15%]",
+      )}
+    />
+  );
+}
 
 export function CharacterStage({
   name,
@@ -57,25 +116,13 @@ export function CharacterStage({
       />
       <div
         className={cn(
-          "relative overflow-hidden rounded-full border bg-white shadow-[0_0_40px_rgba(167,139,250,0.18)]",
+          "relative overflow-hidden rounded-full border bg-transparent",
           compact ? "mb-3 h-40 w-40" : "mb-4 h-56 w-56 md:h-64 md:w-64",
-          light ? "border-violet-200" : "border-violet-300/20 bg-slate-950/80",
+          light ? "border-violet-200/60" : "border-violet-300/20",
         )}
       >
         {asset ? (
-          <Image
-            src={asset.url}
-            alt={`${name} — ${STATE_LABELS[state]}`}
-            fill
-            unoptimized
-            className={cn(
-              "object-cover transition-all duration-500",
-              state === "THINKING" && "animate-pulse",
-              state === "WORKING" && "scale-105",
-              state === "SUCCESS" && "brightness-110",
-              (state === "ERROR" || state === "SAD" || state === "ANGRY") && "grayscale-[15%]",
-            )}
-          />
+          <CharacterMedia asset={asset} name={name} state={state} />
         ) : (
           <div
             className={cn(
@@ -120,6 +167,7 @@ export function CharacterStage({
         />
         <span className={cn("text-xs", light ? "text-slate-500" : "text-slate-400")}>
           {previewState ? `Превью · ${STATE_LABELS[previewState]}` : STATE_LABELS[liveState]}
+          {asset && isVideoAsset(asset) ? " · видео" : ""}
         </span>
       </div>
     </div>

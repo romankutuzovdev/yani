@@ -10,6 +10,10 @@ const MIME: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
   ".gif": "image/gif",
+  ".webm": "video/webm",
+  ".mp4": "video/mp4",
+  ".ogv": "video/ogg",
+  ".ogg": "video/ogg",
 };
 
 export async function GET(_req: NextRequest, { params }: Params) {

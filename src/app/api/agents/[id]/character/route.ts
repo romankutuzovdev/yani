@@ -1,10 +1,12 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { error, json, requireAdmin, writeLog } from "@/lib/api";
-import { saveUploadedImage } from "@/lib/uploads";
+import { saveUploadedMedia } from "@/lib/uploads";
 import type { CharacterState } from "@prisma/client";
 
 type Params = { params: Promise<{ id: string }> };
+
+export const runtime = "nodejs";
 
 const STATES = new Set([
   "IDLE",
@@ -37,13 +39,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!(file instanceof File)) return error("file is required");
 
   try {
-    const saved = await saveUploadedImage(file);
-    const assetType =
-      saved.mimeType === "image/gif"
-        ? "GIF"
-        : saved.mimeType === "image/webp"
-          ? "WEBP"
-          : "IMAGE";
+    const saved = await saveUploadedMedia(file, "characters", { allowVideo: true });
 
     const asset = await prisma.characterAsset.upsert({
       where: {
@@ -57,7 +53,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         mimeType: saved.mimeType,
         filename: saved.filename,
         sizeBytes: saved.sizeBytes,
-        type: assetType,
+        type: saved.kind,
       },
       create: {
         characterId: agent.characterId,
@@ -66,13 +62,13 @@ export async function POST(req: NextRequest, { params }: Params) {
         mimeType: saved.mimeType,
         filename: saved.filename,
         sizeBytes: saved.sizeBytes,
-        type: assetType,
+        type: saved.kind,
       },
     });
 
     await writeLog({
       type: "character",
-      message: `Uploaded ${state} asset for ${agent.name}`,
+      message: `Uploaded ${state} ${saved.kind.toLowerCase()} for ${agent.name}`,
       agentId: agent.id,
       userId: admin.id,
     });

@@ -6,15 +6,15 @@ import { registerMemoryTool } from "../src/memory";
 const prisma = new PrismaClient();
 
 const YANI_EMOTIONS: Array<{ state: CharacterState; file: string }> = [
-  { state: "IDLE", file: "idle.jpg" },
-  { state: "THINKING", file: "thinking.jpg" },
-  { state: "WORKING", file: "working.jpg" },
-  { state: "SUCCESS", file: "success.jpg" },
-  { state: "ERROR", file: "error.jpg" },
-  { state: "SPEAKING", file: "speaking.jpg" },
-  { state: "WAITING", file: "waiting.jpg" },
-  { state: "SAD", file: "sad.jpg" },
-  { state: "ANGRY", file: "angry.jpg" },
+  { state: "IDLE", file: "idle.png" },
+  { state: "THINKING", file: "thinking.png" },
+  { state: "WORKING", file: "working.png" },
+  { state: "SUCCESS", file: "success.png" },
+  { state: "ERROR", file: "error.png" },
+  { state: "SPEAKING", file: "speaking.png" },
+  { state: "WAITING", file: "waiting.png" },
+  { state: "SAD", file: "sad.png" },
+  { state: "ANGRY", file: "angry.png" },
 ];
 
 async function main() {
@@ -179,7 +179,7 @@ async function main() {
       },
       update: {
         url,
-        mimeType: "image/jpeg",
+        mimeType: "image/png",
         filename: emotion.file,
         type: "IMAGE",
         sizeBytes: 0,
@@ -188,7 +188,7 @@ async function main() {
         characterId: characterId!,
         state: emotion.state,
         url,
-        mimeType: "image/jpeg",
+        mimeType: "image/png",
         filename: emotion.file,
         type: "IMAGE",
         sizeBytes: 0,
