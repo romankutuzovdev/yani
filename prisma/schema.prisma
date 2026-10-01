@@ -80,6 +80,7 @@ model User {
   apiKeys      ApiKey[]
   memories     Memory[]  @relation("UserMemories")
   logs         SystemLog[]
+  forms        Form[]
 }
 
 model Agent {
@@ -364,4 +365,63 @@ model SystemLog {
   @@index([level, createdAt])
   @@index([agentId, createdAt])
   @@index([type, createdAt])
+}
+
+enum FormFieldType {
+  TEXT
+  TEXTAREA
+  EMAIL
+  PHONE
+  NUMBER
+  SELECT
+  CHECKBOX
+  DATE
+}
+
+model Form {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  description String   @default("")
+  enabled     Boolean  @default(true)
+  successText String   @default("Спасибо! Ответ отправлен.")
+  ownerId     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner       User?            @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  fields      FormField[]
+  submissions FormSubmission[]
+
+  @@index([enabled])
+}
+
+model FormField {
+  id          String        @id @default(cuid())
+  formId      String
+  label       String
+  name        String
+  type        FormFieldType @default(TEXT)
+  required    Boolean       @default(false)
+  placeholder String        @default("")
+  options     String        @default("[]")
+  sortOrder   Int           @default(0)
+  createdAt   DateTime      @default(now())
+
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, name])
+  @@index([formId, sortOrder])
+}
+
+model FormSubmission {
+  id        String   @id @default(cuid())
+  formId    String
+  answers   String   @default("{}")
+  meta      String   @default("{}")
+  createdAt DateTime @default(now())
+
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@index([formId, createdAt])
 }
