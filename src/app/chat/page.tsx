@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { CharacterStage } from "@/components/CharacterStage";
 import type { CharacterAssetView } from "@/characters/CharacterRenderer";
-import { Wrench } from "lucide-react";
+import { ExternalLink, Wrench, X } from "lucide-react";
 
 type ToolInfo = { name: string; description: string };
 
@@ -20,10 +20,13 @@ type AgentCard = {
   widget?: { config?: { greeting?: string } } | null;
 };
 
+type OfferedForm = { url: string; title: string; reason?: string };
+
 type ChatMsg = {
   role: "user" | "assistant" | "system";
   content: string;
   toolHint?: string;
+  forms?: OfferedForm[];
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -32,6 +35,7 @@ const TOOL_LABELS: Record<string, string> = {
   calculator: "Калькулятор",
   datetime: "Дата и время",
   memory_search: "Поиск по памяти",
+  offer_form: "Открыть форму",
 };
 
 export default function ClientChatPage() {
@@ -41,6 +45,7 @@ export default function ClientChatPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sessionId] = useState(() => `client-${Math.random().toString(36).slice(2)}`);
+  const [activeForm, setActiveForm] = useState<OfferedForm | null>(null);
 
   useEffect(() => {
     void fetch("/api/v1/agents/by-slug/alex")
@@ -114,14 +119,17 @@ export default function ClientChatPage() {
           { role: "assistant", content: data.error ?? "Не удалось получить ответ" },
         ]);
       } else {
+        const forms = (data.forms ?? []) as OfferedForm[];
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
             content: data.reply ?? "Пустой ответ",
             toolHint: activeToolHint ?? undefined,
+            forms,
           },
         ]);
+        if (forms[0]) setActiveForm(forms[0]);
       }
     } catch {
       setMessages((prev) => [
@@ -222,7 +230,21 @@ export default function ClientChatPage() {
                     : "bg-violet-50 text-slate-800"
                 }`}
               >
-                {m.content}
+                <div className="whitespace-pre-wrap">{m.content}</div>
+                {!!m.forms?.length && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {m.forms.map((form) => (
+                      <button
+                        key={form.url}
+                        type="button"
+                        onClick={() => setActiveForm(form)}
+                        className="rounded-xl bg-white px-3 py-2 text-xs font-medium text-violet-700 shadow-sm ring-1 ring-violet-200 hover:bg-violet-50"
+                      >
+                        Открыть: {form.title}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
             {busy && (
@@ -255,6 +277,46 @@ export default function ClientChatPage() {
           </form>
         </section>
       </main>
+
+      {activeForm && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-3 md:items-center md:p-8">
+          <div className="flex h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-3 border-b border-violet-100 px-4 py-3">
+              <div>
+                <p className="font-medium text-slate-900">{activeForm.title}</p>
+                {activeForm.reason && (
+                  <p className="text-xs text-slate-500">{activeForm.reason}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={activeForm.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded-xl border border-violet-200 px-3 py-2 text-xs text-violet-700 hover:bg-violet-50"
+                >
+                  <ExternalLink size={14} />
+                  В новой вкладке
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setActiveForm(null)}
+                  className="rounded-xl border border-violet-200 p-2 text-slate-600 hover:bg-violet-50"
+                  aria-label="Закрыть"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <iframe
+              title={activeForm.title}
+              src={activeForm.url}
+              className="h-full w-full flex-1 bg-white"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

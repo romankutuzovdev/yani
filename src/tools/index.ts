@@ -1,5 +1,11 @@
 import type { AgentTool } from "./types";
-import { calculatorTool, datetimeTool, httpRequestTool, webSearchTool } from "./builtin";
+import {
+  calculatorTool,
+  datetimeTool,
+  httpRequestTool,
+  offerFormTool,
+  webSearchTool,
+} from "./builtin";
 
 const registry = new Map<string, AgentTool>();
 
@@ -20,7 +26,13 @@ export function getToolsByNames(names: string[]): AgentTool[] {
 }
 
 export function registerBuiltinTools() {
-  for (const tool of [webSearchTool, httpRequestTool, calculatorTool, datetimeTool]) {
+  for (const tool of [
+    webSearchTool,
+    httpRequestTool,
+    calculatorTool,
+    datetimeTool,
+    offerFormTool,
+  ]) {
     registerTool(tool);
   }
 }
@@ -33,4 +45,10 @@ export function ensureToolsRegistered() {
 }
 
 export * from "./types";
-export { calculatorTool, datetimeTool, httpRequestTool, webSearchTool };
+export {
+  calculatorTool,
+  datetimeTool,
+  httpRequestTool,
+  offerFormTool,
+  webSearchTool,
+};

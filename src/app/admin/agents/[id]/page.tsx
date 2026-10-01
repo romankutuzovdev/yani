@@ -272,18 +272,32 @@ export default function AgentDetailPage() {
                 </label>
               ))}
             </div>
-            <label className="mt-3 block text-sm text-slate-300">
-              Доп. инструкции
+            <label className="mt-3 block text-sm text-slate-700">
+              Рабочий документ / промпт (до ~10 стр.)
+              <p className="mt-1 text-xs font-normal text-slate-500">
+                Сюда вставь инструкцию для DeepSeek: как отвечать, когда предлагать форму и какие ссылки открывать во фрейме.
+              </p>
               <textarea
-                className="mt-1 min-h-24 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
+                className="mt-2 min-h-56 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2 text-sm leading-relaxed text-slate-800"
                 value={agent.additionalInstructions}
                 onChange={(e) => setAgent({ ...agent, additionalInstructions: e.target.value })}
+                placeholder={`Пример:
+Ты консультант по услугам.
+
+Если пользователь спрашивает про ипотеку — предложи форму заявки:
+https://example.com/forms/ipoteka
+Назови её «Заявка на ипотеку».
+
+Если спрашивает про страховку — форма:
+https://example.com/forms/insurance
+
+Не выдумывай другие ссылки.`}
               />
             </label>
-            <label className="mt-3 block text-sm text-slate-300">
+            <label className="mt-3 block text-sm text-slate-700">
               Свой system prompt (опционально)
               <textarea
-                className="mt-1 min-h-28 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2 font-mono text-xs"
+                className="mt-1 min-h-28 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2 font-mono text-xs text-slate-800"
                 value={agent.systemPrompt}
                 onChange={(e) => setAgent({ ...agent, systemPrompt: e.target.value })}
                 placeholder="Оставьте пустым — соберётся из полей выше"
