@@ -7,7 +7,9 @@ on:
 
 concurrency:
   group: yani-windows-deploy
-  cancel-in-progress: true
+  # Do NOT cancel an in-flight deploy: it already stopped the app.
+  # Cancelling mid-way leaves the site down.
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -33,3 +35,41 @@ jobs:
           Write-Host "==> Running deploy.ps1 (-SkipGit)..."
           powershell -ExecutionPolicy Bypass -File .\scripts\windows\deploy.ps1 -SkipGit
           if ($LASTEXITCODE -ne 0) { throw "deploy.ps1 failed" }
+
+      - name: Ensure site is up (recovery)
+        if: failure()
+        shell: powershell
+        working-directory: C:\apps\yani
+        run: |
+          Write-Host "==> Deploy failed - emergency start of existing build..." -ForegroundColor Yellow
+          powershell -ExecutionPolicy Bypass -File .\scripts\windows\stop.ps1
+          Start-Sleep -Seconds 2
+          if (-not (Test-Path ".\.next")) {
+            if (Test-Path ".\.next-prev") {
+              Copy-Item ".\.next-prev" ".\.next" -Recurse -Force
+              Write-Host "Restored .next from .next-prev"
+            } else {
+              throw "No .next or .next-prev - cannot recover automatically"
+            }
+          }
+          $logDir = ".\data\logs"
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+          $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+          Start-Process powershell.exe `
+            -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File",".\scripts\windows\start.ps1" `
+            -WorkingDirectory (Get-Location).Path `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput (Join-Path $logDir "recovery-$stamp.out.log") `
+            -RedirectStandardError (Join-Path $logDir "recovery-$stamp.err.log")
+          $ok = $false
+          for ($i = 0; $i -lt 45; $i++) {
+            Start-Sleep -Seconds 2
+            try {
+              if (Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue) {
+                $ok = $true
+                break
+              }
+            } catch {}
+          }
+          if (-not $ok) { throw "Emergency start failed - site still down on 8080" }
+          Write-Host "Emergency recovery OK: http://91.149.133.54:8080/chat" -ForegroundColor Green

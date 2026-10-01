@@ -87,6 +87,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\deploy.ps1
 
 Логи процесса: `C:\apps\yani\data\logs\`
 
+Если build падает, деплой поднимает **предыдущий** `.next` (бэкап `.next-prev`), чтобы сайт не оставался выключенным.
+Повторный пуш во время деплоя **не отменяет** текущий job (иначе сайт мог остаться down).
+
 ## Update later (без автодеплоя)
 
 Сначала остановите приложение (**Ctrl+C** в окне `start.ps1`), иначе Windows залочит `query_engine-windows.dll.node` и Prisma упадёт с `EPERM`.
