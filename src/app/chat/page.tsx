@@ -235,7 +235,7 @@ export default function ClientChatPage() {
   return (
     <div className="relative flex min-h-dvh flex-col overflow-x-hidden bg-white text-slate-900">
       {/* Header */}
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-slate-100 bg-white/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-white/80 sm:h-16 sm:px-6">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-yani-ring/40 bg-white/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-white/80 sm:h-16 sm:px-6">
         <Link href="/chat" className="flex min-w-0 items-center gap-2" onClick={startNewChat}>
           {agent?.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -326,7 +326,7 @@ export default function ClientChatPage() {
                   <button
                     type="button"
                     onClick={() => setActiveSkillId(null)}
-                    className="text-xs text-sky-600 active:underline"
+                    className="text-xs text-yani-ink active:underline"
                   >
                     Все навыки
                   </button>
@@ -343,7 +343,7 @@ export default function ClientChatPage() {
                       className={cn(
                         "flex w-full flex-col items-center gap-1.5 rounded-2xl border px-2 py-3 text-center transition active:scale-[0.98] sm:gap-2 sm:px-3 sm:py-4",
                         active
-                          ? "border-sky-400 bg-sky-50 ring-2 ring-sky-100"
+                          ? "border-yani-mid bg-yani-soft ring-2 ring-yani-ring/50"
                           : "border-slate-200 bg-white active:bg-slate-50 sm:hover:border-slate-300 sm:hover:bg-slate-50",
                       )}
                     >
@@ -352,10 +352,10 @@ export default function ClientChatPage() {
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={skill.iconUrl} alt="" className="h-full w-full object-cover" />
                         ) : (
-                          <Sparkles size={16} className="text-sky-500 sm:hidden" />
+                          <Sparkles size={16} className="text-yani-mid sm:hidden" />
                         )}
                         {!skill.iconUrl && (
-                          <Sparkles size={18} className="hidden text-sky-500 sm:block" />
+                          <Sparkles size={18} className="hidden text-yani-mid sm:block" />
                         )}
                       </div>
                       <span className="line-clamp-2 w-full text-[13px] font-medium leading-snug text-slate-800 sm:text-sm">
@@ -398,8 +398,8 @@ export default function ClientChatPage() {
                   className={cn(
                     "max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed sm:max-w-[92%] sm:px-4 sm:py-3",
                     m.role === "user"
-                      ? "ml-auto bg-sky-600 text-white"
-                      : "bg-slate-50 text-slate-800",
+                      ? "ml-auto bg-yani-deep text-white"
+                      : "bg-yani-soft/70 text-slate-800",
                   )}
                 >
                   <div className="whitespace-pre-wrap break-words">{m.content}</div>
@@ -410,7 +410,7 @@ export default function ClientChatPage() {
                           key={form.url}
                           type="button"
                           onClick={() => setActiveForm(form)}
-                          className="rounded-xl bg-white px-3 py-2 text-xs font-medium text-sky-700 shadow-sm ring-1 ring-sky-100"
+                          className="rounded-xl bg-white px-3 py-2 text-xs font-medium text-yani-ink shadow-sm ring-1 ring-yani-ring/50"
                         >
                           Открыть: {form.title}
                         </button>
@@ -420,7 +420,7 @@ export default function ClientChatPage() {
                 </div>
               ))}
               {busy && (
-                <div className="w-fit rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                <div className="w-fit rounded-2xl bg-yani-soft/70 px-4 py-3 text-sm text-slate-500">
                   Думаю…
                 </div>
               )}
@@ -436,11 +436,11 @@ export default function ClientChatPage() {
       <div className="fixed inset-x-0 bottom-0 z-20 bg-gradient-to-t from-white via-white to-transparent px-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-3 sm:px-3 sm:pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pt-4">
         <form
           onSubmit={send}
-          className="mx-auto w-full max-w-3xl rounded-[1.35rem] border border-slate-200 bg-white p-2.5 shadow-[0_8px_30px_rgba(15,23,42,0.08)] sm:rounded-3xl sm:p-3"
+          className="mx-auto w-full max-w-3xl rounded-[1.35rem] border border-yani-ring/50 bg-white p-2.5 shadow-[0_8px_30px_rgba(139,111,212,0.12)] sm:rounded-3xl sm:p-3"
         >
           {activeSkill && (
             <div className="mb-1.5 flex items-center gap-2 px-1 sm:mb-2">
-              <span className="max-w-[70%] truncate rounded-full bg-sky-50 px-2.5 py-0.5 text-xs text-sky-700">
+              <span className="max-w-[70%] truncate rounded-full bg-yani-soft px-2.5 py-0.5 text-xs text-yani-ink">
                 {activeSkill.name}
               </span>
               <button
@@ -467,7 +467,7 @@ export default function ClientChatPage() {
             <button
               type="submit"
               disabled={!agent || busy || !input.trim()}
-              className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-600 text-white transition active:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 sm:h-10 sm:w-10"
+              className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-yani-deep text-white transition active:bg-yani-mid disabled:bg-slate-200 disabled:text-slate-400 sm:h-10 sm:w-10"
               aria-label="Отправить"
             >
               <ArrowUp size={18} />
@@ -500,7 +500,7 @@ export default function ClientChatPage() {
               <button
                 type="button"
                 onClick={startNewChat}
-                className="mb-2 flex w-full items-center gap-2 rounded-xl border border-dashed border-slate-200 px-3 py-3.5 text-sm text-sky-700 active:bg-sky-50"
+                className="mb-2 flex w-full items-center gap-2 rounded-xl border border-dashed border-slate-200 px-3 py-3.5 text-sm text-yani-ink active:bg-yani-soft"
               >
                 <MessageSquarePlus size={16} />
                 Новый чат
@@ -593,7 +593,7 @@ export default function ClientChatPage() {
                   href={activeForm.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex h-10 items-center gap-1 rounded-xl border border-slate-200 px-2.5 text-xs text-sky-700 active:bg-sky-50 sm:px-3"
+                  className="inline-flex h-10 items-center gap-1 rounded-xl border border-slate-200 px-2.5 text-xs text-yani-ink active:bg-yani-soft sm:px-3"
                 >
                   <ExternalLink size={14} />
                   <span className="hidden xs:inline sm:inline">Вкладка</span>

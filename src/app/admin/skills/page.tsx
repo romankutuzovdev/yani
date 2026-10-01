@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, ImagePlus, Sparkles } from "lucide-react";
+import { ArrowDown, ArrowUp, FileText, ImagePlus, Sparkles, Trash2, Upload } from "lucide-react";
 
 type Skill = {
   id: string;
@@ -10,6 +10,9 @@ type Skill = {
   systemPrompt: string;
   model: string;
   iconUrl: string;
+  documentUrl: string;
+  documentName: string;
+  documentText: string;
   tools: string[];
   enabled: boolean;
   sortOrder: number;
@@ -24,7 +27,10 @@ export default function SkillsPage() {
     model: "",
     tools: "web_search,memory_search",
   });
+  const [createDoc, setCreateDoc] = useState<File | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
 
   async function load() {
     const res = await fetch("/api/skills");
@@ -37,19 +43,52 @@ export default function SkillsPage() {
   }, []);
 
   async function create() {
-    await fetch("/api/skills", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...form,
-        tools: form.tools
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean),
-      }),
-    });
-    setForm({ name: "", description: "", systemPrompt: "", model: "", tools: "" });
-    await load();
+    if (!form.name.trim() || !form.description.trim()) {
+      setMessage("Укажите название и описание");
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    try {
+      const res = await fetch("/api/skills", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...form,
+          tools: form.tools
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage(data.error ?? "Не удалось создать");
+        return;
+      }
+      if (createDoc && data.skill?.id) {
+        const fd = new FormData();
+        fd.set("file", createDoc);
+        const up = await fetch(`/api/skills/${data.skill.id}/document`, {
+          method: "POST",
+          body: fd,
+        });
+        const upData = await up.json();
+        if (!up.ok) {
+          setMessage(upData.error ?? "Навык создан, но Word не загрузился");
+          setForm({ name: "", description: "", systemPrompt: "", model: "", tools: "" });
+          setCreateDoc(null);
+          await load();
+          return;
+        }
+      }
+      setForm({ name: "", description: "", systemPrompt: "", model: "", tools: "" });
+      setCreateDoc(null);
+      setMessage("Навык создан");
+      await load();
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function patch(id: string, body: Record<string, unknown>) {
@@ -79,6 +118,29 @@ export default function SkillsPage() {
     await load();
   }
 
+  async function uploadDocument(id: string, file: File) {
+    setBusy(true);
+    setMessage("");
+    try {
+      const fd = new FormData();
+      fd.set("file", file);
+      const res = await fetch(`/api/skills/${id}/document`, { method: "POST", body: fd });
+      const data = await res.json();
+      setMessage(res.ok ? "Word-файл прикреплён" : data.error ?? "Ошибка загрузки");
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeDocument(id: string) {
+    setBusy(true);
+    await fetch(`/api/skills/${id}/document`, { method: "DELETE" });
+    setMessage("Документ удалён");
+    await load();
+    setBusy(false);
+  }
+
   async function remove(id: string) {
     await fetch(`/api/skills/${id}`, { method: "DELETE" });
     await load();
@@ -89,7 +151,7 @@ export default function SkillsPage() {
       <div>
         <h1 className="text-3xl font-semibold text-slate-900">Навыки</h1>
         <p className="mt-1 text-slate-500">
-          Название, описание, иконка, промпт, модель, статус и сортировка
+          Промпт — что делать с текстом. Word (.docx) — источник текста для навыка.
         </p>
       </div>
 
@@ -122,17 +184,55 @@ export default function SkillsPage() {
           onChange={(e) => setForm({ ...form, description: e.target.value })}
         />
         <textarea
-          placeholder="Промпт навыка"
+          placeholder="Промпт навыка — что делать с текстом из Word (например: отвечай по этому регламенту, цитируй пункты…)"
           className="mt-3 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
+          rows={4}
           value={form.systemPrompt}
           onChange={(e) => setForm({ ...form, systemPrompt: e.target.value })}
         />
+
+        <div className="mt-3 rounded-xl border border-dashed border-violet-200 bg-violet-50/30 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-slate-800">Файл Word (.docx)</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Текст из файла попадёт в контекст навыка вместе с промптом
+              </p>
+            </div>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-violet-50">
+              <Upload size={16} />
+              {createDoc ? "Заменить файл" : "Выбрать .docx"}
+              <input
+                type="file"
+                accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                className="hidden"
+                onChange={(e) => setCreateDoc(e.target.files?.[0] ?? null)}
+              />
+            </label>
+          </div>
+          {createDoc && (
+            <p className="mt-2 flex items-center gap-2 text-sm text-violet-700">
+              <FileText size={14} />
+              {createDoc.name}
+              <button
+                type="button"
+                className="ml-auto text-xs text-slate-500 hover:text-rose-600"
+                onClick={() => setCreateDoc(null)}
+              >
+                убрать
+              </button>
+            </p>
+          )}
+        </div>
+
         <button
           onClick={create}
-          className="mt-4 rounded-xl bg-violet-600 px-4 py-2.5 font-medium text-white hover:bg-violet-500"
+          disabled={busy}
+          className="mt-4 rounded-xl bg-violet-600 px-4 py-2.5 font-medium text-white hover:bg-violet-500 disabled:opacity-60"
         >
-          Создать
+          {busy ? "Создание…" : "Создать"}
         </button>
+        {message && <p className="mt-2 text-sm text-slate-600">{message}</p>}
       </section>
 
       <div className="space-y-3">
@@ -180,6 +280,51 @@ export default function SkillsPage() {
                   {(Array.isArray(skill.tools) ? skill.tools : []).join(", ") || "нет"}
                 </p>
 
+                <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/40 px-3 py-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <FileText size={14} className="text-violet-500" />
+                    {skill.documentName ? (
+                      <>
+                        <span className="text-sm text-slate-700">{skill.documentName}</span>
+                        <span className="text-xs text-slate-400">
+                          · {skill.documentText?.length ?? 0} симв.
+                        </span>
+                        <a
+                          href={skill.documentUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-violet-600 hover:underline"
+                        >
+                          скачать
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => void removeDocument(skill.id)}
+                          className="ml-auto inline-flex items-center gap-1 text-xs text-rose-600 hover:underline"
+                        >
+                          <Trash2 size={12} /> удалить
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-sm text-slate-500">Word-файл не прикреплён</span>
+                    )}
+                    <label className="ml-auto inline-flex cursor-pointer items-center gap-1 rounded-lg border border-violet-200 bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-violet-50">
+                      <Upload size={12} />
+                      {skill.documentName ? "Заменить" : "Прикрепить .docx"}
+                      <input
+                        type="file"
+                        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) void uploadDocument(skill.id, file);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
                 {editingId === skill.id && (
                   <div className="mt-3 space-y-2">
                     <textarea
@@ -187,6 +332,7 @@ export default function SkillsPage() {
                       defaultValue={skill.systemPrompt}
                       id={`prompt-${skill.id}`}
                       rows={4}
+                      placeholder="Промпт — что делать с текстом из Word"
                     />
                     <input
                       className="w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2 text-sm"

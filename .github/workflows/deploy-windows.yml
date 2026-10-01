@@ -1,0 +1,35 @@
+name: Deploy to Windows server
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: yani-windows-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Update Yani on Windows
+    runs-on: [self-hosted, Windows, yani]
+    timeout-minutes: 45
+    steps:
+      - name: Pull, rebuild, restart
+        shell: powershell
+        working-directory: C:\apps\yani
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (-not (Test-Path "C:\apps\yani\package.json")) {
+            throw "C:\apps\yani not found. Clone the repo there first (see DEPLOY-WINDOWS.md)."
+          }
+
+          Write-Host "==> Syncing git to origin/main..."
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) { throw "git fetch failed" }
+          git reset --hard origin/main
+          if ($LASTEXITCODE -ne 0) { throw "git reset failed" }
+
+          Write-Host "==> Running deploy.ps1 (-SkipGit)..."
+          powershell -ExecutionPolicy Bypass -File .\scripts\windows\deploy.ps1 -SkipGit
+          if ($LASTEXITCODE -ne 0) { throw "deploy.ps1 failed" }

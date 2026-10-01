@@ -1,8 +1,24 @@
 @import "tailwindcss";
 
 :root {
-  --background: #020617;
-  --foreground: #e2e8f0;
+  --background: #ffffff;
+  --foreground: #0f172a;
+  /* Yani logo lavender */
+  --yani: #d8c6fb;
+  --yani-deep: #8b6fd4;
+  --yani-mid: #a78bfa;
+  --yani-soft: #f3eefc;
+  --yani-ring: #c9b5f5;
+  --yani-ink: #6b52b0;
+}
+
+@theme inline {
+  --color-yani: var(--yani);
+  --color-yani-deep: var(--yani-deep);
+  --color-yani-mid: var(--yani-mid);
+  --color-yani-soft: var(--yani-soft);
+  --color-yani-ring: var(--yani-ring);
+  --color-yani-ink: var(--yani-ink);
 }
 
 body {

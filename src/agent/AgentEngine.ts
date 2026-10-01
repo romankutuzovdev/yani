@@ -82,9 +82,23 @@ function playbookBlock(agent: Agent): string {
   ].join("\n");
 }
 
+function skillPromptBlock(skill: Skill): string {
+  const parts = [`- ${skill.name}: ${skill.description}`];
+  if (skill.systemPrompt?.trim()) {
+    parts.push(`  Instructions: ${skill.systemPrompt.trim()}`);
+  }
+  if (skill.documentText?.trim()) {
+    const docLabel = skill.documentName?.trim() || "attached document";
+    parts.push(
+      `  Document (${docLabel}):\n---\n${skill.documentText.trim()}\n---\n  Use the document text above according to the skill instructions.`,
+    );
+  }
+  return parts.join("\n");
+}
+
 function buildSystemPrompt(agent: Agent, skills: Skill[], memoryBlock: string): string {
   const skillsBlock = skills.length
-    ? `\nActive skills:\n${skills.map((s) => `- ${s.name}: ${s.description}${s.systemPrompt ? `\n  ${s.systemPrompt}` : ""}`).join("\n")}`
+    ? `\nActive skills:\n${skills.map((s) => skillPromptBlock(s)).join("\n")}`
     : "";
   const memory = memoryBlock ? `\nRelevant memory:\n${memoryBlock}` : "";
 

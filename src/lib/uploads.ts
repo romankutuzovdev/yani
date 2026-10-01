@@ -58,6 +58,49 @@ export function assetTypeFromMime(mime: string): AssetKind {
   return "IMAGE";
 }
 
+export async function saveUploadedDocument(
+  file: File,
+  folder: "documents" | "misc" = "documents",
+) {
+  const max = Number(process.env.MAX_UPLOAD_DOC_BYTES ?? 15_728_640); // 15MB
+  const name = file.name || "document.docx";
+  const lower = name.toLowerCase();
+  const mime = file.type || "";
+
+  const isDocx =
+    lower.endsWith(".docx") ||
+    mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const isDoc = lower.endsWith(".doc") || mime === "application/msword";
+
+  if (!isDocx && !isDoc) {
+    throw new Error("Нужен файл Word (.docx). Старый .doc лучше пересохранить как .docx");
+  }
+  if (isDoc && !isDocx) {
+    throw new Error("Поддерживается .docx. Откройте файл в Word и сохраните как .docx");
+  }
+  if (file.size > max) {
+    throw new Error(`Файл слишком большой (макс. ${Math.round(max / 1024 / 1024)} МБ)`);
+  }
+
+  const dir = path.join(process.cwd(), process.env.UPLOAD_DIR ?? "uploads", folder);
+  await mkdir(dir, { recursive: true });
+  const filename = `${Date.now()}-${randomBytes(6).toString("hex")}.docx`;
+  const fullPath = path.join(dir, filename);
+  const buffer = Buffer.from(await file.arrayBuffer());
+  await writeFile(fullPath, buffer);
+
+  return {
+    filename,
+    originalName: name,
+    mimeType:
+      mime || "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    sizeBytes: file.size,
+    url: `/uploads/${folder}/${filename}`,
+    buffer,
+    fullPath,
+  };
+}
+
 export async function saveUploadedMedia(
   file: File,
   folder: "characters" | "logos" | "icons" | "misc" = "characters",

@@ -45,7 +45,49 @@ Open:
 - http://91.149.133.54:8080/chat
 - http://91.149.133.54:8080/login — `admin@yani.local` / `admin123456`
 
-## Update later
+## Auto-deploy after git push (recommended)
+
+После **одного** раза настройки каждый `git push origin main` сам обновит сервер (pull → build → restart).
+
+### 1. Токен runner на GitHub
+
+1. Открой https://github.com/romankutuzovdev/yani/settings/actions/runners/new  
+2. OS: **Windows**, Architecture: **x64**  
+3. Скопируй **token** (живёт ~1 час)
+
+### 2. На Windows-сервере (один раз)
+
+```powershell
+cd C:\apps\yani
+git pull
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\setup-autodeploy.ps1 -Token PASTE_TOKEN_HERE
+```
+
+Скрипт поставит GitHub Actions runner в `C:\apps\actions-runner` и запустит его как Windows-службу.
+
+Проверка: GitHub → **Settings → Actions → Runners** — статус **Idle**.
+
+### 3. Дальше
+
+С ноутбука:
+
+```bash
+git push origin main
+```
+
+На GitHub → **Actions** появится workflow **Deploy to Windows server**.  
+После зелёной галочки сайт: http://91.149.133.54:8080/chat
+
+Ручной деплой (если нужно):
+
+```powershell
+cd C:\apps\yani
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\deploy.ps1
+```
+
+Логи процесса: `C:\apps\yani\data\logs\`
+
+## Update later (без автодеплоя)
 
 Сначала остановите приложение (**Ctrl+C** в окне `start.ps1`), иначе Windows залочит `query_engine-windows.dll.node` и Prisma упадёт с `EPERM`.
 

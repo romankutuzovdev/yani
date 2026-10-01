@@ -161,6 +161,11 @@ model Skill {
   description  String
   iconUrl      String   @default("")
   systemPrompt String   @default("")
+  /** Attached Word (.docx) source for the skill */
+  documentUrl  String   @default("")
+  documentName String   @default("")
+  /** Extracted plain text from the Word file — injected into the agent prompt */
+  documentText String   @default("")
   model        String   @default("")
   tools        String   @default("[]")
   enabled      Boolean  @default(true)

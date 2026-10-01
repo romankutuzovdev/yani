@@ -58,7 +58,7 @@ export function HeroBubble({
   return (
     <div
       className={cn(
-        "relative shrink-0 overflow-hidden rounded-full bg-sky-50/80 ring-1 ring-slate-200/80",
+        "relative shrink-0 overflow-hidden rounded-full bg-yani-soft/80 ring-1 ring-yani-ring/60",
         dim,
         className,
       )}
@@ -103,7 +103,7 @@ export function HeroBubble({
           />
         )
       ) : (
-        <div className="flex h-full w-full flex-col items-center justify-center bg-sky-50 text-sky-700">
+        <div className="flex h-full w-full flex-col items-center justify-center bg-yani-soft text-yani-ink">
           <span className="text-3xl font-semibold">{name.slice(0, 1).toUpperCase()}</span>
         </div>
       )}
