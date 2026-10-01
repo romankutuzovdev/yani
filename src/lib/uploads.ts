@@ -10,7 +10,17 @@ const ALLOWED_MIME = new Set([
   "image/gif",
 ]);
 
-export async function saveUploadedImage(file: File) {
+function extFromMime(mime: string) {
+  if (mime === "image/png") return "png";
+  if (mime === "image/webp") return "webp";
+  if (mime === "image/gif") return "gif";
+  return "jpg";
+}
+
+export async function saveUploadedImage(
+  file: File,
+  folder: "characters" | "logos" | "icons" | "misc" = "characters",
+) {
   const max = Number(process.env.MAX_UPLOAD_BYTES ?? 5_242_880);
   if (file.size > max) {
     throw new Error(`File too large (max ${max} bytes)`);
@@ -19,16 +29,8 @@ export async function saveUploadedImage(file: File) {
     throw new Error(`Unsupported MIME type: ${file.type}`);
   }
 
-  const ext =
-    file.type === "image/png"
-      ? "png"
-      : file.type === "image/webp"
-        ? "webp"
-        : file.type === "image/gif"
-          ? "gif"
-          : "jpg";
-
-  const dir = path.join(process.cwd(), process.env.UPLOAD_DIR ?? "uploads", "characters");
+  const ext = extFromMime(file.type);
+  const dir = path.join(process.cwd(), process.env.UPLOAD_DIR ?? "uploads", folder);
   await mkdir(dir, { recursive: true });
   const filename = `${Date.now()}-${randomBytes(6).toString("hex")}.${ext}`;
   const fullPath = path.join(dir, filename);
@@ -39,6 +41,6 @@ export async function saveUploadedImage(file: File) {
     filename,
     mimeType: file.type,
     sizeBytes: file.size,
-    url: `/uploads/characters/${filename}`,
+    url: `/uploads/${folder}/${filename}`,
   };
 }

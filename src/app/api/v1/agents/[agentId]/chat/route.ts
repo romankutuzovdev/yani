@@ -68,6 +68,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       .object({
         message: z.string().min(1),
         sessionId: z.string().default("widget"),
+        skillId: z.string().optional().nullable(),
       })
       .parse(await req.json());
 
@@ -90,6 +91,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       agentId,
       instruction: body.message,
       sessionId: body.sessionId,
+      skillIds: body.skillId ? [body.skillId] : undefined,
       limits: { maxIterations: Math.min(agent.maxIterations, 6) },
     });
 

@@ -61,24 +61,28 @@ async function main() {
       description: "Help users with product questions and troubleshooting.",
       systemPrompt: "Be empathetic, clear, and solution-oriented.",
       tools: ["memory_search", "datetime"],
+      sortOrder: 0,
     },
     {
       name: "Web Research",
       description: "Research topics on the web and summarize findings.",
       systemPrompt: "Cite sources when available. Prefer factual summaries.",
       tools: ["web_search", "http_request"],
+      sortOrder: 1,
     },
     {
       name: "Data Analysis",
       description: "Analyze numbers and perform calculations.",
       systemPrompt: "Show intermediate reasoning briefly and verify results.",
       tools: ["calculator"],
+      sortOrder: 2,
     },
     {
       name: "Text Writing",
       description: "Write clear marketing and product copy.",
       systemPrompt: "Match the requested tone. Keep text concise.",
       tools: [],
+      sortOrder: 3,
     },
   ];
 
@@ -89,12 +93,15 @@ async function main() {
         description: skill.description,
         systemPrompt: skill.systemPrompt,
         tools: JSON.stringify(skill.tools),
+        sortOrder: skill.sortOrder,
+        enabled: true,
       },
       create: {
         name: skill.name,
         description: skill.description,
         systemPrompt: skill.systemPrompt,
         tools: JSON.stringify(skill.tools),
+        sortOrder: skill.sortOrder,
       },
     });
   }
@@ -132,6 +139,8 @@ async function main() {
         name: "Alex",
         slug: "alex",
         description: "Demo agent with Yani character, skills and tools",
+        logoUrl: "/brand/yani-logo.png",
+        greeting: "Привет! Я Yani. Чем могу помочь?",
         personality: "friendly, curious, reliable",
         role: "General AI assistant",
         communicationStyle: "warm and clear",
@@ -147,10 +156,14 @@ async function main() {
       },
       include: { character: true },
     });
-  } else if (!agent.characterId) {
+  } else {
     agent = await prisma.agent.update({
       where: { id: agent.id },
-      data: { characterId },
+      data: {
+        ...(agent.characterId ? {} : { characterId }),
+        logoUrl: agent.logoUrl || "/brand/yani-logo.png",
+        greeting: agent.greeting || "Привет! Я Yani. Чем могу помочь?",
+      },
       include: { character: true },
     });
   }
@@ -183,12 +196,18 @@ async function main() {
     });
   }
 
-  const allSkills = await prisma.skill.findMany();
-  for (const skill of allSkills) {
+  const allSkills = await prisma.skill.findMany({ orderBy: { sortOrder: "asc" } });
+  for (const [i, skill] of allSkills.entries()) {
     await prisma.agentSkill.upsert({
       where: { agentId_skillId: { agentId: agent.id, skillId: skill.id } },
-      update: { enabled: true },
-      create: { agentId: agent.id, skillId: skill.id, enabled: true },
+      update: { enabled: true, visible: true, sortOrder: i },
+      create: {
+        agentId: agent.id,
+        skillId: skill.id,
+        enabled: true,
+        visible: true,
+        sortOrder: i,
+      },
     });
   }
 

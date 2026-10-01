@@ -88,6 +88,8 @@ model Agent {
   name           String
   slug           String        @unique
   description    String        @default("")
+  logoUrl        String        @default("")
+  greeting       String        @default("")
   personality    String        @default("friendly")
   role           String        @default("AI assistant")
   communicationStyle String    @default("clear and helpful")
@@ -157,24 +159,32 @@ model Skill {
   id           String   @id @default(cuid())
   name         String   @unique
   description  String
+  iconUrl      String   @default("")
   systemPrompt String   @default("")
-  tools        String @default("[]")
+  model        String   @default("")
+  tools        String   @default("[]")
   enabled      Boolean  @default(true)
-  config       String @default("{}")
+  sortOrder    Int      @default(0)
+  config       String   @default("{}")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   agents       AgentSkill[]
+
+  @@index([sortOrder])
 }
 
 model AgentSkill {
-  agentId String
-  skillId String
-  enabled Boolean @default(true)
+  agentId   String
+  skillId   String
+  enabled   Boolean @default(true)
+  visible   Boolean @default(true)
+  sortOrder Int     @default(0)
 
   agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
   skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
 
   @@id([agentId, skillId])
+  @@index([agentId, sortOrder])
 }
 
 model ToolRegistry {

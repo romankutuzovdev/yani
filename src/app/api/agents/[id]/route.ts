@@ -14,7 +14,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
     where: { id },
     include: {
       character: { include: { assets: true } },
-      skills: { include: { skill: true } },
+      skills: {
+        include: { skill: true },
+        orderBy: { sortOrder: "asc" },
+      },
       tools: { include: { tool: true } },
       widgets: true,
       tasks: { orderBy: { createdAt: "desc" }, take: 10 },
@@ -27,6 +30,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
+  logoUrl: z.string().optional(),
+  greeting: z.string().optional(),
   personality: z.string().optional(),
   role: z.string().optional(),
   communicationStyle: z.string().optional(),
@@ -42,6 +47,17 @@ const updateSchema = z.object({
   timeoutMs: z.number().int().optional(),
   enabled: z.boolean().optional(),
   skillIds: z.array(z.string()).optional(),
+  /** Full assignment with order/visibility for the agent */
+  skillAssignments: z
+    .array(
+      z.object({
+        skillId: z.string(),
+        enabled: z.boolean().optional(),
+        visible: z.boolean().optional(),
+        sortOrder: z.number().int().optional(),
+      }),
+    )
+    .optional(),
   toolIds: z.array(z.string()).optional(),
 });
 
@@ -55,13 +71,32 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const existing = await prisma.agent.findUnique({ where: { id } });
     if (!existing) return error("Agent not found", 404);
 
-    const { skillIds, toolIds, ...data } = body;
+    const { skillIds, skillAssignments, toolIds, ...data } = body;
 
-    if (skillIds) {
+    if (skillAssignments) {
+      await prisma.agentSkill.deleteMany({ where: { agentId: id } });
+      if (skillAssignments.length) {
+        await prisma.agentSkill.createMany({
+          data: skillAssignments.map((a, i) => ({
+            agentId: id,
+            skillId: a.skillId,
+            enabled: a.enabled ?? true,
+            visible: a.visible ?? true,
+            sortOrder: a.sortOrder ?? i,
+          })),
+        });
+      }
+    } else if (skillIds) {
       await prisma.agentSkill.deleteMany({ where: { agentId: id } });
       if (skillIds.length) {
         await prisma.agentSkill.createMany({
-          data: skillIds.map((skillId) => ({ agentId: id, skillId })),
+          data: skillIds.map((skillId, i) => ({
+            agentId: id,
+            skillId,
+            sortOrder: i,
+            visible: true,
+            enabled: true,
+          })),
         });
       }
     }
@@ -79,7 +114,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       data,
       include: {
         character: { include: { assets: true } },
-        skills: { include: { skill: true } },
+        skills: {
+          include: { skill: true },
+          orderBy: { sortOrder: "asc" },
+        },
         tools: { include: { tool: true } },
       },
     });

@@ -8,15 +8,20 @@ const skillSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
   systemPrompt: z.string().optional(),
+  model: z.string().optional(),
+  iconUrl: z.string().optional(),
   tools: z.array(z.string()).optional(),
   enabled: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
 });
 
 export async function GET() {
   const admin = await requireAdmin();
   if (admin instanceof Response) return admin;
-  const skills = await prisma.skill.findMany({ orderBy: { name: "asc" } });
+  const skills = await prisma.skill.findMany({
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+  });
   return json({
     skills: skills.map((s) => ({
       ...s,
@@ -31,13 +36,17 @@ export async function POST(req: NextRequest) {
   if (admin instanceof Response) return admin;
   try {
     const body = skillSchema.parse(await req.json());
+    const maxSort = await prisma.skill.aggregate({ _max: { sortOrder: true } });
     const skill = await prisma.skill.create({
       data: {
         name: body.name,
         description: body.description,
         systemPrompt: body.systemPrompt ?? "",
+        model: body.model ?? "",
+        iconUrl: body.iconUrl ?? "",
         tools: JSON.stringify(body.tools ?? []),
         enabled: body.enabled ?? true,
+        sortOrder: body.sortOrder ?? (maxSort._max.sortOrder ?? 0) + 1,
         config: JSON.stringify(body.config ?? {}),
       },
     });
@@ -46,7 +55,16 @@ export async function POST(req: NextRequest) {
       message: `Created skill ${skill.name}`,
       userId: admin.id,
     });
-    return json({ skill }, { status: 201 });
+    return json(
+      {
+        skill: {
+          ...skill,
+          tools: asStringArray(skill.tools),
+          config: asJsonObject(skill.config),
+        },
+      },
+      { status: 201 },
+    );
   } catch (e) {
     if (e instanceof z.ZodError) return error(e.issues[0]?.message ?? "Invalid input");
     return error(e instanceof Error ? e.message : "Failed", 500);

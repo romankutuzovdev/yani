@@ -16,10 +16,28 @@ type Asset = {
   mimeType: string;
 };
 
+type SkillItem = {
+  id: string;
+  name: string;
+  description?: string;
+  iconUrl?: string;
+  enabled?: boolean;
+};
+
+type AgentSkillRow = {
+  skillId: string;
+  enabled: boolean;
+  visible: boolean;
+  sortOrder: number;
+  skill: SkillItem;
+};
+
 type AgentDetail = {
   id: string;
   name: string;
   description: string;
+  logoUrl: string;
+  greeting: string;
   personality: string;
   role: string;
   communicationStyle: string;
@@ -34,7 +52,7 @@ type AgentDetail = {
   status: string;
   statusMessage: string;
   character: { assets: Asset[] } | null;
-  skills: Array<{ skill: { id: string; name: string } }>;
+  skills: AgentSkillRow[];
   tools: Array<{ tool: { id: string; name: string } }>;
 };
 
@@ -43,8 +61,8 @@ const STATES = ALL_CHARACTER_STATES;
 export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
   const [agent, setAgent] = useState<AgentDetail | null>(null);
-  const [skills, setНавыки] = useState<Array<{ id: string; name: string }>>([]);
-  const [tools, setИнструменты] = useState<Array<{ id: string; name: string }>>([]);
+  const [skills, setSkills] = useState<SkillItem[]>([]);
+  const [tools, setTools] = useState<Array<{ id: string; name: string }>>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLog, setChatLog] = useState<Array<{ role: string; content: string }>>([]);
   const [saving, setSaving] = useState(false);
@@ -57,9 +75,31 @@ export default function AgentDetailPage() {
       fetch("/api/skills").then((r) => r.json()),
       fetch("/api/tools").then((r) => r.json()),
     ]);
-    setAgent(a.agent);
-    setНавыки(s.skills ?? []);
-    setИнструменты(t.tools ?? []);
+    const raw = a.agent as AgentDetail & {
+      skills: Array<{
+        skillId?: string;
+        enabled?: boolean;
+        visible?: boolean;
+        sortOrder?: number;
+        skill: SkillItem;
+      }>;
+    };
+    if (raw) {
+      raw.skills = (raw.skills ?? [])
+        .map((row, i) => ({
+          skillId: row.skillId ?? row.skill.id,
+          enabled: row.enabled ?? true,
+          visible: row.visible ?? true,
+          sortOrder: row.sortOrder ?? i,
+          skill: row.skill,
+        }))
+        .sort((x, y) => x.sortOrder - y.sortOrder);
+      raw.logoUrl = raw.logoUrl ?? "";
+      raw.greeting = raw.greeting ?? "";
+    }
+    setAgent(raw);
+    setSkills(s.skills ?? []);
+    setTools(t.tools ?? []);
   }
 
   useEffect(() => {
@@ -85,10 +125,6 @@ export default function AgentDetailPage() {
     return () => es.close();
   }, [params.id]);
 
-  const selectedSkillIds = useMemo(
-    () => new Set(agent?.skills.map((s) => s.skill.id) ?? []),
-    [agent],
-  );
   const selectedToolIds = useMemo(
     () => new Set(agent?.tools.map((t) => t.tool.id) ?? []),
     [agent],
@@ -103,6 +139,8 @@ export default function AgentDetailPage() {
       body: JSON.stringify({
         name: agent.name,
         description: agent.description,
+        logoUrl: agent.logoUrl,
+        greeting: agent.greeting,
         personality: agent.personality,
         role: agent.role,
         communicationStyle: agent.communicationStyle,
@@ -114,12 +152,24 @@ export default function AgentDetailPage() {
         model: agent.model,
         temperature: agent.temperature,
         maxIterations: agent.maxIterations,
-        skillIds: Array.from(selectedSkillIds),
+        skillAssignments: agent.skills.map((s, i) => ({
+          skillId: s.skillId,
+          enabled: s.enabled,
+          visible: s.visible,
+          sortOrder: i,
+        })),
         toolIds: Array.from(selectedToolIds),
       }),
     });
     setSaving(false);
     setMessage(res.ok ? "Сохранено" : "Ошибка сохранения");
+    await load();
+  }
+
+  async function uploadLogo(file: File) {
+    const form = new FormData();
+    form.set("file", file);
+    await fetch(`/api/agents/${params.id}/logo`, { method: "POST", body: form });
     await load();
   }
 
@@ -157,7 +207,7 @@ export default function AgentDetailPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-semibold">{agent.name}</h1>
-          <p className="text-slate-500">Персонаж, характер, навыки и инструменты</p>
+          <p className="text-slate-500">Лого, hero, приветствие, промпт и навыки</p>
         </div>
         <button
           onClick={save}
@@ -168,6 +218,53 @@ export default function AgentDetailPage() {
         </button>
       </div>
       {message && <p className="text-sm text-violet-600">{message}</p>}
+
+      <section className="grid gap-4 rounded-2xl border border-violet-100 bg-white p-5 shadow-sm md:grid-cols-[140px_1fr]">
+        <label className="flex h-32 w-32 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed border-violet-200 bg-violet-50 text-center text-xs text-violet-600 hover:border-violet-400">
+          {agent.logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={agent.logoUrl} alt="logo" className="h-full w-full object-contain p-2" />
+          ) : (
+            <span>Логотип</span>
+          )}
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void uploadLogo(file);
+            }}
+          />
+        </label>
+        <div className="space-y-3">
+          <label className="block text-sm text-slate-700">
+            Название
+            <input
+              className="mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
+              value={agent.name}
+              onChange={(e) => setAgent({ ...agent, name: e.target.value })}
+            />
+          </label>
+          <label className="block text-sm text-slate-700">
+            Приветствие
+            <textarea
+              className="mt-1 min-h-20 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
+              value={agent.greeting}
+              onChange={(e) => setAgent({ ...agent, greeting: e.target.value })}
+              placeholder="Привет! Чем могу помочь?"
+            />
+          </label>
+          <label className="block text-sm text-slate-700">
+            Описание
+            <textarea
+              className="mt-1 min-h-16 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
+              value={agent.description}
+              onChange={(e) => setAgent({ ...agent, description: e.target.value })}
+            />
+          </label>
+        </div>
+      </section>
 
       <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
         <CharacterStage
@@ -338,28 +435,104 @@ https://example.com/forms/insurance
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-2xl border border-violet-100 bg-white shadow-sm p-5">
-          <h2 className="mb-3 font-medium">Навыки</h2>
+          <h2 className="mb-3 font-medium">Назначенные навыки</h2>
+          <p className="mb-4 text-xs text-slate-500">
+            Включите навык, настройте видимость на пользовательском экране и порядок плиток.
+          </p>
           <div className="space-y-2">
-            {skills.map((skill) => (
-              <label key={skill.id} className="flex items-center gap-3 text-sm">
-                <input
-                  type="checkbox"
-                  checked={selectedSkillIds.has(skill.id)}
-                  onChange={(e) => {
-                    const next = new Set(selectedSkillIds);
-                    if (e.target.checked) next.add(skill.id);
-                    else next.delete(skill.id);
-                    setAgent({
-                      ...agent,
-                      skills: Array.from(next).map((id) => ({
-                        skill: skills.find((s) => s.id === id)!,
-                      })),
-                    });
-                  }}
-                />
-                {skill.name}
-              </label>
-            ))}
+            {skills.map((skill) => {
+              const assigned = agent.skills.find((s) => s.skillId === skill.id);
+              const checked = Boolean(assigned);
+              return (
+                <div
+                  key={skill.id}
+                  className="flex flex-wrap items-center gap-3 rounded-xl border border-violet-100 bg-violet-50/40 px-3 py-2 text-sm"
+                >
+                  <label className="flex min-w-[140px] flex-1 items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setAgent({
+                            ...agent,
+                            skills: [
+                              ...agent.skills,
+                              {
+                                skillId: skill.id,
+                                enabled: true,
+                                visible: true,
+                                sortOrder: agent.skills.length,
+                                skill,
+                              },
+                            ],
+                          });
+                        } else {
+                          setAgent({
+                            ...agent,
+                            skills: agent.skills.filter((s) => s.skillId !== skill.id),
+                          });
+                        }
+                      }}
+                    />
+                    {skill.iconUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={skill.iconUrl} alt="" className="h-6 w-6 rounded object-cover" />
+                    ) : null}
+                    <span>{skill.name}</span>
+                  </label>
+                  {assigned && (
+                    <>
+                      <label className="flex items-center gap-1 text-xs text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={assigned.visible}
+                          onChange={(e) => {
+                            setAgent({
+                              ...agent,
+                              skills: agent.skills.map((s) =>
+                                s.skillId === skill.id
+                                  ? { ...s, visible: e.target.checked }
+                                  : s,
+                              ),
+                            });
+                          }}
+                        />
+                        виден
+                      </label>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          className="rounded border border-violet-200 px-2 py-0.5 text-xs"
+                          onClick={() => {
+                            const list = [...agent.skills];
+                            const i = list.findIndex((s) => s.skillId === skill.id);
+                            if (i <= 0) return;
+                            [list[i - 1], list[i]] = [list[i], list[i - 1]];
+                            setAgent({ ...agent, skills: list });
+                          }}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-violet-200 px-2 py-0.5 text-xs"
+                          onClick={() => {
+                            const list = [...agent.skills];
+                            const i = list.findIndex((s) => s.skillId === skill.id);
+                            if (i < 0 || i >= list.length - 1) return;
+                            [list[i], list[i + 1]] = [list[i + 1], list[i]];
+                            setAgent({ ...agent, skills: list });
+                          }}
+                        >
+                          ↓
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
         <section className="rounded-2xl border border-violet-100 bg-white shadow-sm p-5">

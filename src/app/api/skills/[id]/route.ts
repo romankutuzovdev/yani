@@ -10,8 +10,11 @@ const updateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   systemPrompt: z.string().optional(),
+  model: z.string().optional(),
+  iconUrl: z.string().optional(),
   tools: z.array(z.string()).optional(),
   enabled: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
 });
 

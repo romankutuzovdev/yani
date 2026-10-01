@@ -7,6 +7,7 @@ type Agent = {
   id: string;
   name: string;
   description: string;
+  logoUrl?: string;
   status: string;
   model: string;
   _count: { tasks: number; memories: number };
@@ -82,8 +83,22 @@ export default function AgentsPage() {
             href={`/admin/agents/${agent.id}`}
             className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm transition hover:border-violet-200"
           >
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-medium text-slate-900">{agent.name}</h2>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                {agent.logoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={agent.logoUrl}
+                    alt=""
+                    className="h-10 w-10 rounded-xl object-contain bg-slate-950 p-1"
+                  />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-sm font-semibold text-violet-700">
+                    {agent.name.slice(0, 1)}
+                  </div>
+                )}
+                <h2 className="text-xl font-medium text-slate-900">{agent.name}</h2>
+              </div>
               <span className="text-xs uppercase text-slate-500">
                 {STATUS_RU[agent.status] ?? agent.status}
               </span>
