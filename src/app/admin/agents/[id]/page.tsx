@@ -6,6 +6,7 @@ import { CharacterStage } from "@/components/CharacterStage";
 import {
   ALL_CHARACTER_STATES,
   STATE_LABELS,
+  normalizeAssetUrl,
 } from "@/characters/CharacterRenderer";
 import type { CharacterState } from "@prisma/client";
 
@@ -323,7 +324,7 @@ export default function AgentDetailPage() {
                       {asset ? (
                         isVideo ? (
                           <video
-                            src={asset.url}
+                            src={normalizeAssetUrl(asset.url)}
                             className="mx-auto mt-2 h-24 w-24 rounded-xl object-contain"
                             muted
                             loop
@@ -333,7 +334,7 @@ export default function AgentDetailPage() {
                         ) : (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
-                            src={asset.url}
+                            src={normalizeAssetUrl(asset.url)}
                             alt={state}
                             className="mx-auto mt-2 h-24 w-24 rounded-xl object-contain"
                           />

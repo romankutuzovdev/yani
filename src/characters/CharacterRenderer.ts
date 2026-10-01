@@ -7,6 +7,15 @@ export type CharacterAssetView = {
   mimeType: string;
 };
 
+/** Prefer existing public PNG if legacy .jpg URL is stored in DB */
+export function normalizeAssetUrl(url: string): string {
+  if (!url) return url;
+  if (/\.jpe?g(\?|$)/i.test(url) && /\/characters\//i.test(url)) {
+    return url.replace(/\.jpe?g(\?|$)/i, ".png$1");
+  }
+  return url;
+}
+
 export function isVideoAsset(asset: Pick<CharacterAssetView, "type" | "mimeType" | "url"> | null | undefined) {
   if (!asset) return false;
   if (asset.type === "VIDEO") return true;

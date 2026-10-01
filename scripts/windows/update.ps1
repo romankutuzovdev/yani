@@ -84,6 +84,19 @@ Write-Host "==> prisma db push..." -ForegroundColor Cyan
 npx prisma db push
 Assert-Ok "prisma db push"
 
+Write-Host "==> fix character asset URLs..." -ForegroundColor Cyan
+npx tsx scripts/fix-character-urls.ts
+# non-fatal if script missing on old builds
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "    (skip fix-character-urls)" -ForegroundColor Yellow
+}
+
+Write-Host "==> db seed (refresh demo assets)..." -ForegroundColor Cyan
+npm run db:seed
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "    (seed failed - continue)" -ForegroundColor Yellow
+}
+
 Write-Host "==> build..." -ForegroundColor Cyan
 npm run build
 Assert-Ok "npm run build"

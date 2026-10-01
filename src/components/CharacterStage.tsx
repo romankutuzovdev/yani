@@ -1,10 +1,10 @@
 "use client";
 
-import Image from "next/image";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   agentStatusToCharacterState,
   isVideoAsset,
+  normalizeAssetUrl,
   resolveCharacterAsset,
   STATE_LABELS,
   type CharacterAssetView,
@@ -23,6 +23,12 @@ function CharacterMedia({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const video = isVideoAsset(asset);
+  const primary = normalizeAssetUrl(asset.url);
+  const [src, setSrc] = useState(primary);
+
+  useEffect(() => {
+    setSrc(normalizeAssetUrl(asset.url));
+  }, [asset.url]);
 
   useEffect(() => {
     if (!video) return;
@@ -30,14 +36,14 @@ function CharacterMedia({
     if (!el) return;
     el.load();
     void el.play().catch(() => undefined);
-  }, [video, asset.url, state]);
+  }, [video, src, state]);
 
   if (video) {
     return (
       <video
         ref={videoRef}
-        key={asset.url}
-        src={asset.url}
+        key={src}
+        src={src}
         className={cn(
           "absolute inset-0 h-full w-full object-contain transition-all duration-500",
           state === "WORKING" && "scale-105",
@@ -53,18 +59,26 @@ function CharacterMedia({
   }
 
   return (
-    <Image
-      src={asset.url}
+    // Use native img: more reliable for /public + /uploads than next/image fill
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      key={src}
+      src={src}
       alt={`${name} — ${STATE_LABELS[state]}`}
-      fill
-      unoptimized
       className={cn(
-        "object-contain transition-all duration-500",
+        "absolute inset-0 h-full w-full object-contain transition-all duration-500",
         state === "THINKING" && "animate-pulse",
         state === "WORKING" && "scale-105",
         state === "SUCCESS" && "brightness-110",
         (state === "ERROR" || state === "SAD" || state === "ANGRY") && "grayscale-[15%]",
       )}
+      onError={() => {
+        if (src.endsWith(".png")) {
+          setSrc(src.replace(/\.png$/i, ".jpg"));
+        } else if (/\.jpe?g$/i.test(src)) {
+          setSrc(src.replace(/\.jpe?g$/i, ".png"));
+        }
+      }}
     />
   );
 }
@@ -117,7 +131,7 @@ export function CharacterStage({
       <div
         className={cn(
           "relative overflow-hidden rounded-full border bg-transparent",
-          compact ? "mb-3 h-40 w-40" : "mb-4 h-56 w-56 md:h-64 md:w-64",
+          compact ? "mb-3 h-44 w-44" : "mb-4 h-56 w-56 md:h-64 md:w-64",
           light ? "border-violet-200/60" : "border-violet-300/20",
         )}
       >
