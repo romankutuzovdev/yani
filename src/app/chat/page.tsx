@@ -129,6 +129,13 @@ export default function ClientChatPage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [input]);
+
   const activeSkill = useMemo(
     () => agent?.skills.find((s) => s.id === activeSkillId) ?? null,
     [agent, activeSkillId],
@@ -226,38 +233,41 @@ export default function ClientChatPage() {
   }
 
   return (
-    <div className="relative flex min-h-dvh flex-col bg-white text-slate-900">
+    <div className="relative flex min-h-dvh flex-col overflow-x-hidden bg-white text-slate-900">
       {/* Header */}
-      <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-100 bg-white/90 px-4 py-3 backdrop-blur md:px-6">
-        <Link href="/chat" className="flex items-center gap-2" onClick={startNewChat}>
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-slate-100 bg-white/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-white/80 sm:h-16 sm:px-6">
+        <Link href="/chat" className="flex min-w-0 items-center gap-2" onClick={startNewChat}>
           {agent?.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={agent.logoUrl}
               alt="yani"
-              className="h-8 w-auto max-w-[120px] object-contain"
+              className="h-7 w-auto max-w-[100px] object-contain sm:h-8 sm:max-w-[120px]"
             />
           ) : (
-            <span className="text-lg font-semibold tracking-tight text-slate-900">yani</span>
+            <span className="text-base font-semibold tracking-tight text-slate-900 sm:text-lg">
+              yani
+            </span>
           )}
         </Link>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={() => {
               setHistoryOpen(true);
               setMenuOpen(false);
             }}
-            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 active:bg-slate-50 sm:h-auto sm:w-auto sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-sm"
+            aria-label="История чатов"
           >
-            <History size={15} />
+            <History size={16} />
             <span className="hidden sm:inline">История чатов</span>
           </button>
           <button
             type="button"
             onClick={startNewChat}
-            className="rounded-full border border-slate-200 p-2 text-slate-700 hover:bg-slate-50"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-700 active:bg-slate-50"
             aria-label="Новый чат"
           >
             <MessageSquarePlus size={18} />
@@ -268,7 +278,7 @@ export default function ClientChatPage() {
               setMenuOpen(true);
               setHistoryOpen(false);
             }}
-            className="rounded-full border border-slate-200 p-2 text-slate-700 hover:bg-slate-50"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-700 active:bg-slate-50"
             aria-label="Меню"
           >
             <Menu size={18} />
@@ -277,44 +287,52 @@ export default function ClientChatPage() {
       </header>
 
       {/* Main */}
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 pb-36 pt-4 md:px-6">
+      <main
+        className={cn(
+          "mx-auto flex w-full max-w-3xl flex-1 flex-col px-3 pt-3 sm:px-6 sm:pt-4",
+          hasConversation ? "pb-[calc(7.5rem+env(safe-area-inset-bottom))]" : "pb-[calc(6.5rem+env(safe-area-inset-bottom))]",
+        )}
+      >
         {!hasConversation ? (
-          <section className="flex flex-1 flex-col items-center justify-center pb-8 text-center">
+          <section className="flex flex-1 flex-col items-center justify-start pt-2 text-center sm:justify-center sm:pb-8 sm:pt-0">
             {agent ? (
               <HeroBubble
                 name={agent.name}
                 assets={agent.character?.assets ?? []}
                 status={agent.status}
                 size="lg"
+                className="h-28 w-28 sm:h-44 sm:w-44 md:h-52 md:w-52"
               />
             ) : (
-              <div className="flex h-40 w-40 items-center justify-center rounded-full bg-slate-50 text-slate-400">
+              <div className="flex h-28 w-28 items-center justify-center rounded-full bg-slate-50 text-slate-400 sm:h-40 sm:w-40">
                 …
               </div>
             )}
 
-            <h1 className="mt-6 text-2xl font-medium tracking-tight text-slate-900 sm:text-3xl">
+            <h1 className="mt-4 text-xl font-medium tracking-tight text-slate-900 sm:mt-6 sm:text-3xl">
               Чем я могу помочь?
             </h1>
             {agent?.statusMessage && (
-              <p className="mt-2 text-sm text-slate-500">{agent.statusMessage}</p>
+              <p className="mt-1.5 max-w-sm px-2 text-xs text-slate-500 sm:mt-2 sm:text-sm">
+                {agent.statusMessage}
+              </p>
             )}
 
             {/* Skills */}
-            <div className="mt-8 w-full">
-              <div className="mb-3 flex items-center justify-between px-1">
-                <p className="text-sm font-medium text-slate-500">Навыки</p>
+            <div className="mt-5 w-full sm:mt-8">
+              <div className="mb-2.5 flex items-center justify-between px-0.5 sm:mb-3 sm:px-1">
+                <p className="text-xs font-medium text-slate-500 sm:text-sm">Навыки</p>
                 {activeSkillId && (
                   <button
                     type="button"
                     onClick={() => setActiveSkillId(null)}
-                    className="text-xs text-sky-600 hover:underline"
+                    className="text-xs text-sky-600 active:underline"
                   >
                     Все навыки
                   </button>
                 )}
               </div>
-              <div className="flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4">
                 {(agent?.skills ?? []).map((skill) => {
                   const active = activeSkillId === skill.id;
                   return (
@@ -323,35 +341,38 @@ export default function ClientChatPage() {
                       type="button"
                       onClick={() => setActiveSkillId(active ? null : skill.id)}
                       className={cn(
-                        "flex w-[132px] shrink-0 flex-col items-center gap-2 rounded-2xl border px-3 py-4 text-center transition",
+                        "flex w-full flex-col items-center gap-1.5 rounded-2xl border px-2 py-3 text-center transition active:scale-[0.98] sm:gap-2 sm:px-3 sm:py-4",
                         active
                           ? "border-sky-400 bg-sky-50 ring-2 ring-sky-100"
-                          : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50",
+                          : "border-slate-200 bg-white active:bg-slate-50 sm:hover:border-slate-300 sm:hover:bg-slate-50",
                       )}
                     >
-                      <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-slate-100">
+                      <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-slate-100 sm:h-11 sm:w-11">
                         {skill.iconUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={skill.iconUrl} alt="" className="h-full w-full object-cover" />
                         ) : (
-                          <Sparkles size={18} className="text-sky-500" />
+                          <Sparkles size={16} className="text-sky-500 sm:hidden" />
+                        )}
+                        {!skill.iconUrl && (
+                          <Sparkles size={18} className="hidden text-sky-500 sm:block" />
                         )}
                       </div>
-                      <span className="line-clamp-2 text-sm font-medium text-slate-800">
+                      <span className="line-clamp-2 w-full text-[13px] font-medium leading-snug text-slate-800 sm:text-sm">
                         {skill.name}
                       </span>
                     </button>
                   );
                 })}
                 {agent && !agent.skills.length && (
-                  <p className="w-full py-4 text-sm text-slate-400">Навыки не назначены</p>
+                  <p className="col-span-full py-4 text-sm text-slate-400">Навыки не назначены</p>
                 )}
               </div>
             </div>
           </section>
         ) : (
           <section className="flex flex-1 flex-col">
-            <div className="mb-4 flex items-center gap-3">
+            <div className="mb-3 flex items-center gap-2.5 sm:mb-4 sm:gap-3">
               {agent && (
                 <HeroBubble
                   name={agent.name}
@@ -360,26 +381,28 @@ export default function ClientChatPage() {
                   size="sm"
                 />
               )}
-              <div>
-                <p className="text-sm font-medium text-slate-800">{agent?.name ?? "Yani"}</p>
-                <p className="text-xs text-slate-500">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-slate-800">
+                  {agent?.name ?? "Yani"}
+                </p>
+                <p className="truncate text-xs text-slate-500">
                   {activeSkill ? `Навык: ${activeSkill.name}` : "Все навыки"}
                 </p>
               </div>
             </div>
 
-            <div className="flex-1 space-y-4">
+            <div className="flex-1 space-y-3 sm:space-y-4">
               {messages.map((m, i) => (
                 <div
                   key={i}
                   className={cn(
-                    "max-w-[92%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed",
+                    "max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed sm:max-w-[92%] sm:px-4 sm:py-3",
                     m.role === "user"
                       ? "ml-auto bg-sky-600 text-white"
                       : "bg-slate-50 text-slate-800",
                   )}
                 >
-                  <div className="whitespace-pre-wrap">{m.content}</div>
+                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
                   {!!m.forms?.length && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {m.forms.map((form) => (
@@ -403,39 +426,6 @@ export default function ClientChatPage() {
               )}
               <div ref={chatEndRef} />
             </div>
-
-            {/* skills chips while chatting */}
-            {(agent?.skills?.length ?? 0) > 0 && (
-              <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-                <button
-                  type="button"
-                  onClick={() => setActiveSkillId(null)}
-                  className={cn(
-                    "shrink-0 rounded-full border px-3 py-1.5 text-xs",
-                    !activeSkillId
-                      ? "border-sky-400 bg-sky-50 text-sky-700"
-                      : "border-slate-200 text-slate-600",
-                  )}
-                >
-                  Все
-                </button>
-                {agent!.skills.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setActiveSkillId(s.id === activeSkillId ? null : s.id)}
-                    className={cn(
-                      "shrink-0 rounded-full border px-3 py-1.5 text-xs",
-                      activeSkillId === s.id
-                        ? "border-sky-400 bg-sky-50 text-sky-700"
-                        : "border-slate-200 text-slate-600",
-                    )}
-                  >
-                    {s.name}
-                  </button>
-                ))}
-              </div>
-            )}
           </section>
         )}
 
@@ -443,63 +433,41 @@ export default function ClientChatPage() {
       </main>
 
       {/* Bottom composer */}
-      <div className="fixed inset-x-0 bottom-0 z-20 bg-gradient-to-t from-white via-white to-transparent px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-4">
+      <div className="fixed inset-x-0 bottom-0 z-20 bg-gradient-to-t from-white via-white to-transparent px-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-3 sm:px-3 sm:pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pt-4">
         <form
           onSubmit={send}
-          className="mx-auto w-full max-w-3xl rounded-3xl border border-slate-200 bg-white p-3 shadow-[0_8px_30px_rgba(15,23,42,0.08)]"
+          className="mx-auto w-full max-w-3xl rounded-[1.35rem] border border-slate-200 bg-white p-2.5 shadow-[0_8px_30px_rgba(15,23,42,0.08)] sm:rounded-3xl sm:p-3"
         >
           {activeSkill && (
-            <div className="mb-2 flex items-center gap-2 px-1">
-              <span className="rounded-full bg-sky-50 px-2.5 py-0.5 text-xs text-sky-700">
+            <div className="mb-1.5 flex items-center gap-2 px-1 sm:mb-2">
+              <span className="max-w-[70%] truncate rounded-full bg-sky-50 px-2.5 py-0.5 text-xs text-sky-700">
                 {activeSkill.name}
               </span>
               <button
                 type="button"
                 onClick={() => setActiveSkillId(null)}
-                className="text-xs text-slate-400 hover:text-slate-600"
+                className="shrink-0 text-xs text-slate-400 active:text-slate-600"
               >
                 сбросить
               </button>
             </div>
           )}
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onKeyDown}
-            rows={1}
-            placeholder={greeting}
-            disabled={!agent || busy}
-            className="max-h-40 min-h-[44px] w-full resize-none bg-transparent px-2 py-2 text-[15px] outline-none placeholder:text-slate-400"
-          />
-          <div className="mt-1 flex items-center justify-between gap-2 px-1">
-            <div className="flex min-w-0 gap-2 overflow-x-auto">
-              {(agent?.skills ?? []).slice(0, 4).map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => setActiveSkillId(s.id === activeSkillId ? null : s.id)}
-                  className={cn(
-                    "inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-xs",
-                    activeSkillId === s.id
-                      ? "border-sky-400 bg-sky-50 text-sky-700"
-                      : "border-slate-200 text-slate-600 hover:bg-slate-50",
-                  )}
-                >
-                  {s.iconUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={s.iconUrl} alt="" className="h-3.5 w-3.5 rounded-sm object-cover" />
-                  ) : (
-                    <Sparkles size={12} />
-                  )}
-                  {s.name}
-                </button>
-              ))}
-            </div>
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={onKeyDown}
+              rows={1}
+              placeholder={greeting}
+              disabled={!agent || busy}
+              enterKeyHint="send"
+              className="max-h-[120px] min-h-[40px] w-full flex-1 resize-none bg-transparent px-2 py-2 text-base leading-snug outline-none placeholder:text-slate-400 sm:min-h-[44px] sm:text-[15px]"
+            />
             <button
               type="submit"
               disabled={!agent || busy || !input.trim()}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-600 text-white transition hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400"
+              className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-600 text-white transition active:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 sm:h-10 sm:w-10"
               aria-label="Отправить"
             >
               <ArrowUp size={18} />
@@ -510,22 +478,29 @@ export default function ClientChatPage() {
 
       {/* History drawer */}
       {historyOpen && (
-        <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/30" onClick={() => setHistoryOpen(false)}>
+        <div
+          className="fixed inset-0 z-40 flex justify-end bg-slate-950/30"
+          onClick={() => setHistoryOpen(false)}
+        >
           <aside
-            className="flex h-full w-full max-w-sm flex-col bg-white shadow-xl"
+            className="flex h-full w-full max-w-full flex-col bg-white shadow-xl sm:max-w-sm"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div className="flex h-14 items-center justify-between border-b border-slate-100 px-4">
               <h2 className="font-medium">История чатов</h2>
-              <button type="button" onClick={() => setHistoryOpen(false)} className="rounded-lg p-2 hover:bg-slate-50">
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg active:bg-slate-50"
+              >
                 <X size={18} />
               </button>
             </div>
-            <div className="flex-1 space-y-1 overflow-y-auto p-3">
+            <div className="flex-1 space-y-1 overflow-y-auto overscroll-contain p-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
               <button
                 type="button"
                 onClick={startNewChat}
-                className="mb-2 flex w-full items-center gap-2 rounded-xl border border-dashed border-slate-200 px-3 py-3 text-sm text-sky-700 hover:bg-sky-50"
+                className="mb-2 flex w-full items-center gap-2 rounded-xl border border-dashed border-slate-200 px-3 py-3.5 text-sm text-sky-700 active:bg-sky-50"
               >
                 <MessageSquarePlus size={16} />
                 Новый чат
@@ -536,7 +511,7 @@ export default function ClientChatPage() {
                   type="button"
                   onClick={() => openSession(s)}
                   className={cn(
-                    "block w-full rounded-xl px-3 py-3 text-left text-sm hover:bg-slate-50",
+                    "block w-full rounded-xl px-3 py-3.5 text-left text-sm active:bg-slate-50",
                     s.id === sessionId && "bg-slate-50",
                   )}
                 >
@@ -556,22 +531,29 @@ export default function ClientChatPage() {
 
       {/* Menu drawer */}
       {menuOpen && (
-        <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/30" onClick={() => setMenuOpen(false)}>
+        <div
+          className="fixed inset-0 z-40 flex justify-end bg-slate-950/30"
+          onClick={() => setMenuOpen(false)}
+        >
           <aside
-            className="flex h-full w-full max-w-xs flex-col bg-white shadow-xl"
+            className="flex h-full w-[min(100%,20rem)] flex-col bg-white shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div className="flex h-14 items-center justify-between border-b border-slate-100 px-4">
               <h2 className="font-medium">Меню</h2>
-              <button type="button" onClick={() => setMenuOpen(false)} className="rounded-lg p-2 hover:bg-slate-50">
+              <button
+                type="button"
+                onClick={() => setMenuOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg active:bg-slate-50"
+              >
                 <X size={18} />
               </button>
             </div>
-            <nav className="space-y-1 p-3 text-sm">
+            <nav className="space-y-1 p-3 text-sm pb-[max(1rem,env(safe-area-inset-bottom))]">
               <button
                 type="button"
                 onClick={startNewChat}
-                className="flex w-full items-center gap-2 rounded-xl px-3 py-3 text-left hover:bg-slate-50"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-3.5 text-left active:bg-slate-50"
               >
                 <MessageSquarePlus size={16} /> Новый чат
               </button>
@@ -581,13 +563,13 @@ export default function ClientChatPage() {
                   setMenuOpen(false);
                   setHistoryOpen(true);
                 }}
-                className="flex w-full items-center gap-2 rounded-xl px-3 py-3 text-left hover:bg-slate-50"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-3.5 text-left active:bg-slate-50"
               >
                 <History size={16} /> История чатов
               </button>
               <Link
                 href="/login"
-                className="flex w-full items-center gap-2 rounded-xl px-3 py-3 hover:bg-slate-50"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-3.5 active:bg-slate-50"
               >
                 Админка
               </Link>
@@ -597,29 +579,29 @@ export default function ClientChatPage() {
       )}
 
       {activeForm && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-3 md:items-center md:p-8">
-          <div className="flex h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
-              <div>
-                <p className="font-medium text-slate-900">{activeForm.title}</p>
+        <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/40 p-0 sm:items-center sm:p-8">
+          <div className="flex h-dvh w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl sm:h-[85vh] sm:rounded-3xl">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
+              <div className="min-w-0">
+                <p className="truncate font-medium text-slate-900">{activeForm.title}</p>
                 {activeForm.reason && (
-                  <p className="text-xs text-slate-500">{activeForm.reason}</p>
+                  <p className="truncate text-xs text-slate-500">{activeForm.reason}</p>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
                 <a
                   href={activeForm.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs text-sky-700 hover:bg-sky-50"
+                  className="inline-flex h-10 items-center gap-1 rounded-xl border border-slate-200 px-2.5 text-xs text-sky-700 active:bg-sky-50 sm:px-3"
                 >
                   <ExternalLink size={14} />
-                  В новой вкладке
+                  <span className="hidden xs:inline sm:inline">Вкладка</span>
                 </a>
                 <button
                   type="button"
                   onClick={() => setActiveForm(null)}
-                  className="rounded-xl border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 active:bg-slate-50"
                   aria-label="Закрыть"
                 >
                   <X size={16} />

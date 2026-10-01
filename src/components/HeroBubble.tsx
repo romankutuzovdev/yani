@@ -49,7 +49,11 @@ export function HeroBubble({
   }, [video, src]);
 
   const dim =
-    size === "sm" ? "h-10 w-10" : size === "md" ? "h-24 w-24" : "h-44 w-44 sm:h-52 sm:w-52";
+    size === "sm"
+      ? "h-10 w-10"
+      : size === "md"
+        ? "h-20 w-20 sm:h-24 sm:w-24"
+        : "h-28 w-28 sm:h-44 sm:w-44 md:h-52 md:w-52";
 
   return (
     <div
