@@ -63,7 +63,7 @@ git pull
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\setup-autodeploy.ps1 -Token PASTE_TOKEN_HERE
 ```
 
-Скрипт поставит GitHub Actions runner в `C:\apps\actions-runner` и запустит его как Windows-службу.
+Скрипт поставит GitHub Actions runner в `C:\actions-runner` и запустит его как Windows-службу.
 
 Проверка: GitHub → **Settings → Actions → Runners** — статус **Idle**.
 

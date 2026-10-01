@@ -14,7 +14,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$Token,
   [string]$Url = "https://github.com/romankutuzovdev/yani",
-  [string]$RunnerDir = "C:\apps\actions-runner",
+  [string]$RunnerDir = "C:\actions-runner",
   [string]$RunnerName = "yani-windows",
   [string]$Labels = "self-hosted,Windows,yani"
 )
@@ -33,8 +33,8 @@ if (-not (Test-Path "C:\apps\yani\package.json")) {
 New-Item -ItemType Directory -Force -Path $RunnerDir | Out-Null
 Set-Location $RunnerDir
 
-# Latest Windows x64 runner (pin major version for stability)
-$version = "2.321.0"
+# Windows x64 runner
+$version = "2.337.0"
 $zip = "actions-runner-win-x64-$version.zip"
 $download = "https://github.com/actions/runner/releases/download/v$version/$zip"
 
