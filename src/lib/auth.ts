@@ -56,10 +56,15 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
 
 export async function setSessionCookie(token: string) {
   const jar = await cookies();
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const secure =
+    process.env.COOKIE_SECURE === "true" ||
+    appUrl.startsWith("https://");
+
   jar.set(COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure,
     path: "/",
     maxAge: 60 * 60 * 24 * 7,
   });
