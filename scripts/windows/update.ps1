@@ -24,6 +24,10 @@ Set-Location $Root
 function Stop-YaniOnPort {
   param([int]$Port = 8080)
   Write-Host "==> Stopping processes on port $Port ..." -ForegroundColor Cyan
+  # Only the process that LISTENS on 8080.
+  # Do not kill every node whose path contains "yani" — that also kills
+  # the GitHub Actions job itself (working dir C:\apps\yani) and leaves the site down.
+  $ids = @{}
   try {
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
   } catch {
@@ -31,22 +35,16 @@ function Stop-YaniOnPort {
   }
   foreach ($c in $conns) {
     $procId = $c.OwningProcess
-    if ($procId -and $procId -ne 0) {
-      try {
-        $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
-        if ($p) {
-          Write-Host ("    stop PID {0} ({1})" -f $procId, $p.ProcessName) -ForegroundColor Yellow
-          Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-        }
-      } catch {}
+    if ($procId -and $procId -ne 0 -and $procId -ne $PID) {
+      $ids[$procId] = $true
     }
   }
-  Get-Process node -ErrorAction SilentlyContinue | ForEach-Object {
+  foreach ($procId in $ids.Keys) {
     try {
-      $cmd = (Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $_.Id)).CommandLine
-      if ($cmd -and ($cmd -like "*yani*" -or $cmd -like "*next*")) {
-        Write-Host ("    stop node PID {0}" -f $_.Id) -ForegroundColor Yellow
-        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+      $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
+      if ($p) {
+        Write-Host ("    stop PID {0} ({1})" -f $procId, $p.ProcessName) -ForegroundColor Yellow
+        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
       }
     } catch {}
   }
