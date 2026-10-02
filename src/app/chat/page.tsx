@@ -5,6 +5,7 @@ import Link from "next/link";
 import { HeroBubble } from "@/components/HeroBubble";
 import type { CharacterAssetView } from "@/characters/CharacterRenderer";
 import {
+  ArrowLeft,
   ArrowUp,
   ExternalLink,
   History,
@@ -329,8 +330,11 @@ export default function ClientChatPage() {
                   <button
                     type="button"
                     onClick={() => setActiveSkillId(null)}
-                    className="absolute right-0 top-1/2 -translate-y-1/2 text-xs text-yani-ink active:underline"
+                    className="absolute right-0 top-1/2 inline-flex -translate-y-1/2 items-center gap-1.5 text-xs text-slate-400 active:text-slate-500"
                   >
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 text-slate-400">
+                      <ArrowLeft size={13} />
+                    </span>
                     Все навыки
                   </button>
                 )}
@@ -344,24 +348,21 @@ export default function ClientChatPage() {
                       type="button"
                       onClick={() => setActiveSkillId(active ? null : skill.id)}
                       className={cn(
-                        "flex w-full flex-col items-center gap-1.5 rounded-2xl border px-2 py-3 text-center transition active:scale-[0.98] sm:gap-2 sm:px-3 sm:py-4",
+                        "flex w-full flex-col items-center justify-center gap-1.5 rounded-2xl border px-2 py-3 text-center transition active:scale-[0.98] sm:gap-2 sm:px-3 sm:py-4",
                         active
                           ? "border-yani-mid bg-yani-soft ring-2 ring-yani-ring/50"
                           : "border-slate-200 bg-white active:bg-slate-50 sm:hover:border-slate-300 sm:hover:bg-slate-50",
                       )}
                     >
-                      <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-slate-100 sm:h-11 sm:w-11">
+                      <div className="mx-auto flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-slate-100 sm:h-11 sm:w-11">
                         {skill.iconUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={skill.iconUrl} alt="" className="h-full w-full object-cover" />
                         ) : (
-                          <Sparkles size={16} className="text-yani-mid sm:hidden" />
-                        )}
-                        {!skill.iconUrl && (
-                          <Sparkles size={18} className="hidden text-yani-mid sm:block" />
+                          <Sparkles size={16} className="text-yani-mid" />
                         )}
                       </div>
-                      <span className="line-clamp-2 w-full text-[13px] font-medium leading-snug text-slate-800 sm:text-sm">
+                      <span className="line-clamp-2 w-full text-center text-[13px] font-medium leading-snug text-slate-800 sm:text-sm">
                         {skill.name}
                       </span>
                     </button>

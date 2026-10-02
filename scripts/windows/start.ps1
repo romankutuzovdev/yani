@@ -40,10 +40,33 @@ if (-not (Test-Path (Join-Path $Root "node_modules\next"))) {
   throw "Missing node_modules"
 }
 
-if (-not (Test-Path (Join-Path $Root ".next"))) {
-  Write-Host "No build found. Building..." -ForegroundColor Yellow
+$standalone = Join-Path $Root ".next\standalone\server.js"
+if (-not (Test-Path $standalone)) {
+  Write-Host "No standalone build. Building..." -ForegroundColor Yellow
   npm run build
   if ($LASTEXITCODE -ne 0) { throw "build failed" }
 }
 
-npx --no-install next start -H 0.0.0.0 -p 8080
+if (-not (Test-Path $standalone)) {
+  throw "Missing .next\standalone\server.js after build"
+}
+
+# Standalone server does not include public/ or .next/static by itself.
+$standaloneRoot = Join-Path $Root ".next\standalone"
+$publicSrc = Join-Path $Root "public"
+$publicDst = Join-Path $standaloneRoot "public"
+if (Test-Path $publicSrc) {
+  if (Test-Path $publicDst) { Remove-Item -Recurse -Force $publicDst }
+  Copy-Item $publicSrc $publicDst -Recurse -Force
+}
+$staticSrc = Join-Path $Root ".next\static"
+$staticDstParent = Join-Path $standaloneRoot ".next"
+$staticDst = Join-Path $staticDstParent "static"
+if (Test-Path $staticSrc) {
+  New-Item -ItemType Directory -Force -Path $staticDstParent | Out-Null
+  if (Test-Path $staticDst) { Remove-Item -Recurse -Force $staticDst }
+  Copy-Item $staticSrc $staticDst -Recurse -Force
+}
+
+Write-Host "==> node .next\standalone\server.js" -ForegroundColor Cyan
+node $standalone
