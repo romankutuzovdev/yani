@@ -291,25 +291,33 @@ export default function ClientChatPage() {
       <main
         className={cn(
           "mx-auto flex w-full max-w-3xl flex-1 flex-col px-5 pt-3 sm:px-6 sm:pt-4",
-          hasConversation ? "pb-[calc(7.5rem+env(safe-area-inset-bottom))]" : "pb-[calc(6.5rem+env(safe-area-inset-bottom))]",
+          "pb-[calc(6.5rem+env(safe-area-inset-bottom))]",
         )}
       >
-        {!hasConversation ? (
-          <section className="flex flex-1 flex-col items-center justify-start pt-2 text-center sm:justify-center sm:pb-8 sm:pt-0">
-            {agent ? (
-              <HeroBubble
-                name={agent.name}
-                assets={agent.character?.assets ?? []}
-                status={agent.status}
-                size="lg"
-                className="h-28 w-28 sm:h-44 sm:w-44 md:h-52 md:w-52"
-              />
-            ) : (
-              <div className="flex h-28 w-28 items-center justify-center rounded-full bg-slate-50 text-slate-400 sm:h-40 sm:w-40">
-                …
-              </div>
-            )}
+        {/* Hero always stays on screen — same place when chat starts */}
+        <div className="sticky top-14 z-20 -mx-5 flex flex-col items-center bg-white/95 px-5 pb-3 pt-2 backdrop-blur supports-[backdrop-filter]:bg-white/90 sm:top-16 sm:-mx-6 sm:px-6 sm:pb-4">
+          {agent ? (
+            <HeroBubble
+              name={agent.name}
+              assets={agent.character?.assets ?? []}
+              status={agent.status}
+              size="lg"
+              className="h-28 w-28 sm:h-44 sm:w-44 md:h-52 md:w-52"
+            />
+          ) : (
+            <div className="flex h-28 w-28 items-center justify-center rounded-full bg-slate-50 text-slate-400 sm:h-40 sm:w-40">
+              …
+            </div>
+          )}
+          {hasConversation && (
+            <p className="mt-2 text-xs text-slate-500">
+              {activeSkill ? `Навык: ${activeSkill.name}` : agent?.name ?? "Yani"}
+            </p>
+          )}
+        </div>
 
+        {!hasConversation ? (
+          <section className="flex flex-1 flex-col items-center justify-start text-center sm:pb-8">
             <h1 className="mt-4 text-xl font-medium tracking-tight text-slate-900 sm:mt-6 sm:text-3xl">
               Чем я могу помочь?
             </h1>
@@ -319,9 +327,9 @@ export default function ClientChatPage() {
               </p>
             )}
 
-            {/* Skills */}
-            <div className="mt-3 w-full sm:mt-5">
-              <div className="relative mb-2.5 sm:mb-3">
+            {/* Skills — равные отступы сверху (от заголовка) и снизу */}
+            <div className="mt-6 w-full pb-6 sm:mt-8 sm:pb-8">
+              <div className="mb-2.5 flex flex-col items-center gap-2.5 sm:mb-3 sm:gap-3">
                 <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-slate-400 sm:text-sm">
                   <Sparkles size={14} className="text-slate-400" />
                   Навыки
@@ -330,7 +338,7 @@ export default function ClientChatPage() {
                   <button
                     type="button"
                     onClick={() => setActiveSkillId(null)}
-                    className="absolute right-0 top-1/2 inline-flex -translate-y-1/2 items-center gap-1.5 text-xs text-slate-400 active:text-slate-500"
+                    className="inline-flex items-center gap-1.5 text-xs text-slate-400 active:text-slate-500"
                   >
                     <span className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 text-slate-400">
                       <ArrowLeft size={13} />
@@ -376,25 +384,6 @@ export default function ClientChatPage() {
           </section>
         ) : (
           <section className="flex flex-1 flex-col">
-            <div className="mb-3 flex items-center gap-2.5 sm:mb-4 sm:gap-3">
-              {agent && (
-                <HeroBubble
-                  name={agent.name}
-                  assets={agent.character?.assets ?? []}
-                  status={agent.status}
-                  size="sm"
-                />
-              )}
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-slate-800">
-                  {agent?.name ?? "Yani"}
-                </p>
-                <p className="truncate text-xs text-slate-500">
-                  {activeSkill ? `Навык: ${activeSkill.name}` : "Все навыки"}
-                </p>
-              </div>
-            </div>
-
             <div className="flex-1 space-y-3 sm:space-y-4">
               {messages.map((m, i) => (
                 <div
