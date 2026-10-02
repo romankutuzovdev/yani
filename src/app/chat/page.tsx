@@ -235,7 +235,7 @@ export default function ClientChatPage() {
   return (
     <div className="relative flex min-h-dvh flex-col overflow-x-hidden bg-white text-slate-900">
       {/* Header */}
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-yani-ring/40 bg-white/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-white/80 sm:h-16 sm:px-6">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-yani-ring/40 bg-white/95 px-5 backdrop-blur supports-[backdrop-filter]:bg-white/80 sm:h-16 sm:px-6">
         <Link href="/chat" className="flex min-w-0 items-center gap-2" onClick={startNewChat}>
           {agent?.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -289,7 +289,7 @@ export default function ClientChatPage() {
       {/* Main */}
       <main
         className={cn(
-          "mx-auto flex w-full max-w-3xl flex-1 flex-col px-3 pt-3 sm:px-6 sm:pt-4",
+          "mx-auto flex w-full max-w-3xl flex-1 flex-col px-5 pt-3 sm:px-6 sm:pt-4",
           hasConversation ? "pb-[calc(7.5rem+env(safe-area-inset-bottom))]" : "pb-[calc(6.5rem+env(safe-area-inset-bottom))]",
         )}
       >
@@ -436,7 +436,7 @@ export default function ClientChatPage() {
       </main>
 
       {/* Bottom composer */}
-      <div className="fixed inset-x-0 bottom-0 z-20 bg-gradient-to-t from-white via-white to-transparent px-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-3 sm:px-3 sm:pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pt-4">
+      <div className="fixed inset-x-0 bottom-0 z-20 bg-gradient-to-t from-white via-white to-transparent px-5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pt-4">
         <form
           onSubmit={send}
           className="mx-auto w-full max-w-3xl rounded-[1.35rem] border border-yani-ring/50 bg-white p-2.5 shadow-[0_8px_30px_rgba(139,111,212,0.12)] sm:rounded-3xl sm:p-3"
