@@ -84,6 +84,7 @@ export default function ClientChatPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -127,7 +128,9 @@ export default function ClientChatPage() {
   }, [agent?.id]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const box = messagesRef.current;
+    if (!box) return;
+    box.scrollTop = box.scrollHeight;
   }, [messages, busy]);
 
   useEffect(() => {
@@ -136,6 +139,29 @@ export default function ClientChatPage() {
     el.style.height = "0px";
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, [input]);
+
+  // Keep layout stable when mobile keyboard opens (iOS visualViewport)
+  useEffect(() => {
+    const root = document.documentElement;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    function sync() {
+      const offset = Math.max(0, window.innerHeight - vv!.height - vv!.offsetTop);
+      root.style.setProperty("--kb-offset", `${offset}px`);
+      root.style.setProperty("--vv-height", `${vv!.height}px`);
+    }
+
+    sync();
+    vv.addEventListener("resize", sync);
+    vv.addEventListener("scroll", sync);
+    return () => {
+      vv.removeEventListener("resize", sync);
+      vv.removeEventListener("scroll", sync);
+      root.style.removeProperty("--kb-offset");
+      root.style.removeProperty("--vv-height");
+    };
+  }, []);
 
   const activeSkill = useMemo(
     () => agent?.skills.find((s) => s.id === activeSkillId) ?? null,
@@ -234,9 +260,12 @@ export default function ClientChatPage() {
   }
 
   return (
-    <div className="relative flex min-h-dvh flex-col overflow-x-hidden bg-white text-slate-900">
-      {/* Header */}
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-yani-ring/40 bg-white/95 px-5 backdrop-blur supports-[backdrop-filter]:bg-white/80 sm:h-16 sm:px-6">
+    <div
+      className="relative flex flex-col overflow-hidden bg-white text-slate-900"
+      style={{ height: "var(--vv-height, 100dvh)" }}
+    >
+      {/* Header — never scrolls away */}
+      <header className="z-30 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-yani-ring/40 bg-white px-5 sm:h-16 sm:px-6">
         <Link href="/chat" className="flex min-w-0 items-center gap-2" onClick={startNewChat}>
           {agent?.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -287,38 +316,36 @@ export default function ClientChatPage() {
         </div>
       </header>
 
-      {/* Main */}
-      <main
-        className={cn(
-          "mx-auto flex w-full max-w-3xl flex-1 flex-col px-5 pt-3 sm:px-6 sm:pt-4",
-          "pb-[calc(6.5rem+env(safe-area-inset-bottom))]",
+      {/* Hero — fixed in layout, not in scroll area (survives keyboard) */}
+      <div className="flex shrink-0 flex-col items-center bg-white px-5 pb-2 pt-2 sm:px-6 sm:pb-3 sm:pt-3">
+        {agent ? (
+          <HeroBubble
+            name={agent.name}
+            assets={agent.character?.assets ?? []}
+            status={agent.status}
+            size="lg"
+            className="h-24 w-24 sm:h-40 sm:w-40 md:h-48 md:w-48"
+          />
+        ) : (
+          <div className="flex h-24 w-24 items-center justify-center rounded-full bg-slate-50 text-slate-400 sm:h-40 sm:w-40">
+            …
+          </div>
         )}
-      >
-        {/* Hero always stays on screen — same place when chat starts */}
-        <div className="sticky top-14 z-20 -mx-5 flex flex-col items-center bg-white/95 px-5 pb-3 pt-2 backdrop-blur supports-[backdrop-filter]:bg-white/90 sm:top-16 sm:-mx-6 sm:px-6 sm:pb-4">
-          {agent ? (
-            <HeroBubble
-              name={agent.name}
-              assets={agent.character?.assets ?? []}
-              status={agent.status}
-              size="lg"
-              className="h-28 w-28 sm:h-44 sm:w-44 md:h-52 md:w-52"
-            />
-          ) : (
-            <div className="flex h-28 w-28 items-center justify-center rounded-full bg-slate-50 text-slate-400 sm:h-40 sm:w-40">
-              …
-            </div>
-          )}
-          {hasConversation && (
-            <p className="mt-2 text-xs text-slate-500">
-              {activeSkill ? `Навык: ${activeSkill.name}` : agent?.name ?? "Yani"}
-            </p>
-          )}
-        </div>
+        {hasConversation && (
+          <p className="mt-1.5 text-xs text-slate-500">
+            {activeSkill ? `Навык: ${activeSkill.name}` : agent?.name ?? "Yani"}
+          </p>
+        )}
+      </div>
 
+      {/* Only this middle zone scrolls */}
+      <div
+        ref={messagesRef}
+        className="mx-auto min-h-0 w-full max-w-3xl flex-1 overflow-y-auto overscroll-contain px-5 sm:px-6"
+      >
         {!hasConversation ? (
-          <section className="flex flex-1 flex-col items-center justify-start text-center sm:pb-8">
-            <h1 className="mt-4 text-xl font-medium tracking-tight text-slate-900 sm:mt-6 sm:text-3xl">
+          <section className="flex flex-col items-center justify-start pb-4 text-center">
+            <h1 className="mt-2 text-xl font-medium tracking-tight text-slate-900 sm:mt-4 sm:text-3xl">
               Чем я могу помочь?
             </h1>
             {agent?.statusMessage && (
@@ -327,8 +354,7 @@ export default function ClientChatPage() {
               </p>
             )}
 
-            {/* Skills — равные отступы сверху (от заголовка) и снизу */}
-            <div className="mt-6 w-full pb-6 sm:mt-8 sm:pb-8">
+            <div className="mt-6 w-full pb-4 sm:mt-8">
               <div className="mb-2.5 flex flex-col items-center gap-2.5 sm:mb-3 sm:gap-3">
                 <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-slate-400 sm:text-sm">
                   <Sparkles size={14} className="text-slate-400" />
@@ -383,8 +409,8 @@ export default function ClientChatPage() {
             </div>
           </section>
         ) : (
-          <section className="flex flex-1 flex-col">
-            <div className="flex-1 space-y-3 sm:space-y-4">
+          <section className="flex flex-col pb-2">
+            <div className="space-y-3 sm:space-y-4">
               {messages.map((m, i) => (
                 <div
                   key={i}
@@ -423,10 +449,13 @@ export default function ClientChatPage() {
         )}
 
         {error && <p className="mt-2 text-center text-sm text-rose-600">{error}</p>}
-      </main>
+      </div>
 
-      {/* Bottom composer */}
-      <div className="fixed inset-x-0 bottom-0 z-20 bg-gradient-to-t from-white via-white to-transparent px-5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pt-4">
+      {/* Composer — in flex column, rides above keyboard */}
+      <div
+        className="z-20 shrink-0 bg-gradient-to-t from-white via-white to-transparent px-5 pt-2 sm:px-6 sm:pt-3"
+        style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
+      >
         <form
           onSubmit={send}
           className="mx-auto w-full max-w-3xl rounded-[1.35rem] border border-yani-ring/50 bg-white p-2.5 shadow-[0_8px_30px_rgba(139,111,212,0.12)] sm:rounded-3xl sm:p-3"
