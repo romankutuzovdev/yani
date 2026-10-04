@@ -116,7 +116,6 @@ export async function POST(req: NextRequest, { params }: Params) {
         reply: result.result || result.error,
         success: result.success,
         status: agent.status,
-        forms: result.forms ?? [],
       },
       { headers: corsHeaders(origin) },
     );

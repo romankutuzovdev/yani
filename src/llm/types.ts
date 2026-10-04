@@ -38,6 +38,7 @@ export interface LLMResponse {
     inputTokens: number;
     outputTokens: number;
     totalTokens: number;
+    cachedInputTokens?: number;
   };
   model: string;
   provider: string;
@@ -49,8 +50,30 @@ export interface LLMChunk {
   done?: boolean;
 }
 
+export type LLMModelKind = "chat" | "image" | "all";
+
+export interface ModelRate {
+  inputUsdPerM: number;
+  outputUsdPerM: number;
+  cacheReadUsdPerM?: number;
+}
+
+export interface ModelPricing extends ModelRate {
+  usdPerImage?: number;
+  longContext?: ModelRate & { thresholdTokens: number };
+}
+
+export interface LLMModelInfo {
+  id: string;
+  displayName: string;
+  isImage: boolean;
+  ownedBy?: string;
+  pricing?: ModelPricing;
+}
+
 export interface LLMProvider {
   readonly name: string;
   chat(messages: Message[], options?: LLMOptions): Promise<LLMResponse>;
   stream(messages: Message[], options?: LLMOptions): AsyncIterable<LLMChunk>;
+  listModels?(kind?: LLMModelKind): Promise<LLMModelInfo[]>;
 }

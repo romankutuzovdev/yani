@@ -147,7 +147,11 @@ async function main() {
         goals: "Help users complete tasks accurately",
         rules: "Be honest about uncertainty. Prefer tools for facts.",
         restrictions: "Do not invent credentials or private data.",
-        model: process.env.DEEPSEEK_MODEL ?? "deepseek-chat",
+        model:
+          process.env.VIBECODE_MODEL ??
+          process.env.DEEPSEEK_MODEL ??
+          process.env.LLM_MODEL ??
+          "gpt-5.5",
         temperature: 0.7,
         maxIterations: 8,
         ownerId: admin.id,
@@ -232,65 +236,9 @@ async function main() {
     },
   });
 
-  const demoForm = await prisma.form.upsert({
-    where: { slug: "zayavka" },
-    update: {
-      title: "Заявка",
-      description: "Оставьте контакты — мы свяжемся с вами.",
-      enabled: true,
-      successText: "Спасибо! Заявка принята.",
-      ownerId: admin.id,
-    },
-    create: {
-      title: "Заявка",
-      slug: "zayavka",
-      description: "Оставьте контакты — мы свяжемся с вами.",
-      enabled: true,
-      successText: "Спасибо! Заявка принята.",
-      ownerId: admin.id,
-    },
-  });
-
-  await prisma.formField.deleteMany({ where: { formId: demoForm.id } });
-  const demoFields = [
-    { label: "Имя", name: "name", type: "TEXT" as const, required: true, placeholder: "Как к вам обращаться", sortOrder: 0, options: "[]" },
-    { label: "Телефон", name: "phone", type: "PHONE" as const, required: true, placeholder: "+7 …", sortOrder: 1, options: "[]" },
-    { label: "Email", name: "email", type: "EMAIL" as const, required: false, placeholder: "you@example.com", sortOrder: 2, options: "[]" },
-    {
-      label: "Тема",
-      name: "topic",
-      type: "SELECT" as const,
-      required: true,
-      placeholder: "",
-      sortOrder: 3,
-      options: JSON.stringify(["Консультация", "Ипотека", "Страховка", "Другое"]),
-    },
-    { label: "Комментарий", name: "comment", type: "TEXTAREA" as const, required: false, placeholder: "Кратко опишите запрос", sortOrder: 4, options: "[]" },
-  ];
-  for (const field of demoFields) {
-    await prisma.formField.create({
-      data: { formId: demoForm.id, ...field },
-    });
-  }
-
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:8080").replace(/\/$/, "");
-  const playbook = `Ты консультант сервиса Yani.
-
-Если пользователь хочет оставить заявку, записаться или просит форму — предложи форму по ссылке:
-${appUrl}/f/zayavka
-Название: «Заявка».
-
-Используй инструмент offer_form с этим URL. Не выдумывай другие ссылки.`;
-
-  await prisma.agent.update({
-    where: { id: agent.id },
-    data: { additionalInstructions: playbook },
-  });
-
   console.log("Seed complete");
   console.log(`Admin: ${email} / ${password}`);
   console.log(`Demo agent slug: alex (id: ${agent.id})`);
-  console.log(`Demo form: ${appUrl}/f/zayavka`);
   console.log(`Character emotions: ${YANI_EMOTIONS.length}`);
 }
 

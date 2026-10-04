@@ -1,0 +1,65 @@
+name: Deploy to yani.by
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: yani-hoster-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and update hoster.by
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        env:
+          CI: "1"
+          NEXT_TELEMETRY_DISABLED: "1"
+          DATABASE_URL: file:./data/yani.db
+          NEXT_PUBLIC_APP_URL: https://yani.by
+          JWT_SECRET: ci-build-only
+        run: npm run build
+
+      - name: Pack standalone
+        run: |
+          set -eu
+          cp -a public .next/standalone/public
+          mkdir -p .next/standalone/.next
+          rm -rf .next/standalone/.next/static
+          cp -a .next/static .next/standalone/.next/static
+          rm -f .next/standalone/.env
+          tar -czf yani-release.tgz -C .next/standalone .
+
+      - name: Upload and restart
+        env:
+          SSH_KEY: ${{ secrets.HOSTER_SSH_KEY }}
+          HOST: vh160.hoster.by
+          USER: h209040
+        run: |
+          set -eu
+          if [ -z "$SSH_KEY" ]; then
+            echo "GitHub secret HOSTER_SSH_KEY is empty." >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/yani_hoster
+          chmod 600 ~/.ssh/yani_hoster
+          ssh-keyscan -p 22 "$HOST" >> ~/.ssh/known_hosts
+          scp -i ~/.ssh/yani_hoster -P 22 yani-release.tgz "${USER}@${HOST}:~/yani-release.tgz"
+          ssh -i ~/.ssh/yani_hoster -p 22 "${USER}@${HOST}" "bash --noprofile --norc -s" < scripts/hoster/apply-release.sh

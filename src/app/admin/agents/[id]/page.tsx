@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { CharacterStage } from "@/components/CharacterStage";
+import { ModelSelect } from "@/components/ModelSelect";
 import {
   ALL_CHARACTER_STATES,
   STATE_LABELS,
@@ -63,18 +64,17 @@ export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const [skills, setSkills] = useState<SkillItem[]>([]);
-  const [tools, setTools] = useState<Array<{ id: string; name: string }>>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLog, setChatLog] = useState<Array<{ role: string; content: string }>>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [previewState, setPreviewState] = useState<CharacterState | null>(null);
+  const [spentLabel, setSpentLabel] = useState("");
 
   async function load() {
-    const [a, s, t] = await Promise.all([
+    const [a, s] = await Promise.all([
       fetch(`/api/agents/${params.id}`).then((r) => r.json()),
       fetch("/api/skills").then((r) => r.json()),
-      fetch("/api/tools").then((r) => r.json()),
     ]);
     const raw = a.agent as AgentDetail & {
       skills: Array<{
@@ -100,7 +100,13 @@ export default function AgentDetailPage() {
     }
     setAgent(raw);
     setSkills(s.skills ?? []);
-    setTools(t.tools ?? []);
+    try {
+      const usage = await fetch(`/api/llm/usage?agentId=${params.id}`).then((r) => r.json());
+      const row = (usage.byAgent ?? []).find((a: { agentId: string }) => a.agentId === params.id);
+      setSpentLabel(row?.costLabel ?? "$0");
+    } catch {
+      setSpentLabel("");
+    }
   }
 
   useEffect(() => {
@@ -125,11 +131,6 @@ export default function AgentDetailPage() {
     };
     return () => es.close();
   }, [params.id]);
-
-  const selectedToolIds = useMemo(
-    () => new Set(agent?.tools.map((t) => t.tool.id) ?? []),
-    [agent],
-  );
 
   async function save() {
     if (!agent) return;
@@ -159,7 +160,6 @@ export default function AgentDetailPage() {
           visible: s.visible,
           sortOrder: i,
         })),
-        toolIds: Array.from(selectedToolIds),
       }),
     });
     setSaving(false);
@@ -267,6 +267,21 @@ export default function AgentDetailPage() {
         </div>
       </section>
 
+      <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
+        <h2 className="font-medium text-slate-900">Модель этого агента</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Только этот агент отвечает выбранной моделью. Цена в списке — вход / выход за 1 млн токенов.
+          Потрачено на запросы этого агента: <span className="font-medium text-slate-800">{spentLabel || "—"}</span>
+        </p>
+        <div className="mt-3 max-w-xl">
+          <ModelSelect
+            value={agent.model ?? ""}
+            onChange={(model) => setAgent({ ...agent, model })}
+          />
+        </div>
+        <p className="mt-2 text-xs text-slate-500">Сохраняется вместе с кнопкой «Сохранить» внизу страницы.</p>
+      </section>
+
       <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
         <CharacterStage
           name={agent.name}
@@ -362,97 +377,10 @@ export default function AgentDetailPage() {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-violet-100 bg-white shadow-sm p-5">
-            <h2 className="mb-4 font-medium">Конструктор system prompt</h2>
-            <div className="grid gap-3 md:grid-cols-2">
-              {(
-                [
-                  ["name", "Имя"],
-                  ["role", "Роль"],
-                  ["personality", "Характер"],
-                  ["communicationStyle", "Стиль общения"],
-                  ["goals", "Цели"],
-                  ["rules", "Правила"],
-                  ["restrictions", "Ограничения"],
-                  ["model", "Модель"],
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key} className="text-sm text-slate-300">
-                  {label}
-                  <input
-                    className="mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
-                    value={String(agent[key] ?? "")}
-                    onChange={(e) => setAgent({ ...agent, [key]: e.target.value })}
-                  />
-                </label>
-              ))}
-            </div>
-            <label className="mt-3 block text-sm text-slate-700">
-              Рабочий документ / промпт (до ~10 стр.)
-              <p className="mt-1 text-xs font-normal text-slate-500">
-                Сюда вставь инструкцию для DeepSeek: как отвечать, когда предлагать форму и какие ссылки открывать во фрейме.
-              </p>
-              <textarea
-                className="mt-2 min-h-56 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2 text-sm leading-relaxed text-slate-800"
-                value={agent.additionalInstructions}
-                onChange={(e) => setAgent({ ...agent, additionalInstructions: e.target.value })}
-                placeholder={`Пример:
-Ты консультант по услугам.
-
-Если пользователь спрашивает про ипотеку — предложи форму заявки:
-https://example.com/forms/ipoteka
-Назови её «Заявка на ипотеку».
-
-Если спрашивает про страховку — форма:
-https://example.com/forms/insurance
-
-Не выдумывай другие ссылки.`}
-              />
-            </label>
-            <label className="mt-3 block text-sm text-slate-700">
-              Свой system prompt (опционально)
-              <textarea
-                className="mt-1 min-h-28 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2 font-mono text-xs text-slate-800"
-                value={agent.systemPrompt}
-                onChange={(e) => setAgent({ ...agent, systemPrompt: e.target.value })}
-                placeholder="Оставьте пустым — соберётся из полей выше"
-              />
-            </label>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="text-sm text-slate-300">
-                Температура
-                <input
-                  type="number"
-                  step="0.1"
-                  min={0}
-                  max={2}
-                  className="mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
-                  value={agent.temperature}
-                  onChange={(e) =>
-                    setAgent({ ...agent, temperature: Number(e.target.value) })
-                  }
-                />
-              </label>
-              <label className="text-sm text-slate-300">
-                Макс. итераций
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  className="mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
-                  value={agent.maxIterations}
-                  onChange={(e) =>
-                    setAgent({ ...agent, maxIterations: Number(e.target.value) })
-                  }
-                />
-              </label>
-            </div>
-          </section>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-violet-100 bg-white shadow-sm p-5">
+      <section className="rounded-2xl border border-violet-100 bg-white shadow-sm p-5">
           <h2 className="mb-3 font-medium">Назначенные навыки</h2>
           <p className="mb-4 text-xs text-slate-500">
             Включите навык, настройте видимость на пользовательском экране и порядок плиток.
@@ -553,32 +481,6 @@ https://example.com/forms/insurance
             })}
           </div>
         </section>
-        <section className="rounded-2xl border border-violet-100 bg-white shadow-sm p-5">
-          <h2 className="mb-3 font-medium">Инструменты</h2>
-          <div className="space-y-2">
-            {tools.map((tool) => (
-              <label key={tool.id} className="flex items-center gap-3 text-sm">
-                <input
-                  type="checkbox"
-                  checked={selectedToolIds.has(tool.id)}
-                  onChange={(e) => {
-                    const next = new Set(selectedToolIds);
-                    if (e.target.checked) next.add(tool.id);
-                    else next.delete(tool.id);
-                    setAgent({
-                      ...agent,
-                      tools: Array.from(next).map((id) => ({
-                        tool: tools.find((t) => t.id === id)!,
-                      })),
-                    });
-                  }}
-                />
-                {tool.name}
-              </label>
-            ))}
-          </div>
-        </section>
-      </div>
 
       <section className="rounded-2xl border border-violet-100 bg-white shadow-sm p-5">
         <h2 className="mb-3 font-medium">Чат с агентом</h2>

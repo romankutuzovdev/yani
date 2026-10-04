@@ -1,0 +1,14 @@
+HTTP/2 200 
+server: nginx/1.30.4
+date: Sat, 03 Oct 2026 10:41:55 GMT
+content-type: text/html; charset=utf-8
+content-length: 12112
+vary: rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding
+x-nextjs-cache: HIT
+x-nextjs-prerender: 1
+x-nextjs-prerender: 1
+x-nextjs-stale-time: 300
+x-powered-by: Next.js
+cache-control: s-maxage=31536000
+etag: "bdcoww4xpx96f"
+

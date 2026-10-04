@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { error, json, requireAdmin, writeLog } from "@/lib/api";
 import { saveUploadedDocument } from "@/lib/uploads";
-import { extractDocxText } from "@/lib/docx";
+import { extractDocxText, extractPlainText } from "@/lib/docx";
 import { asStringArray, asJsonObject } from "@/lib/utils";
 
 type Params = { params: Promise<{ id: string }> };
@@ -20,19 +20,33 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!(file instanceof File)) return error("file is required");
 
   try {
-    const saved = await saveUploadedDocument(file, "documents");
-    const documentText = await extractDocxText(saved.buffer);
+    const lower = (file.name || "").toLowerCase();
+    const isPlain =
+      lower.endsWith(".txt") ||
+      lower.endsWith(".md") ||
+      file.type.startsWith("text/");
+    let documentUrl = "";
+    let documentName = file.name || "Текст";
+    let documentText = "";
+    if (isPlain) {
+      documentText = extractPlainText(Buffer.from(await file.arrayBuffer()));
+    } else {
+      const saved = await saveUploadedDocument(file, "documents");
+      documentText = await extractDocxText(saved.buffer);
+      documentUrl = saved.url;
+      documentName = saved.originalName;
+    }
     const updated = await prisma.skill.update({
       where: { id },
       data: {
-        documentUrl: saved.url,
-        documentName: saved.originalName,
+        documentUrl,
+        documentName,
         documentText,
       },
     });
     await writeLog({
       type: "skill",
-      message: `Uploaded Word document for ${skill.name}: ${saved.originalName}`,
+      message: `Attached text for ${skill.name}: ${documentName}`,
       userId: admin.id,
     });
     return json({
@@ -62,7 +76,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
 
   await writeLog({
     type: "skill",
-    message: `Removed Word document from ${skill.name}`,
+    message: `Removed attached text from ${skill.name}`,
     userId: admin.id,
   });
 

@@ -10,6 +10,7 @@ import {
 import { DEFAULT_HERO_ASSETS } from "@/characters/defaults";
 import type { CharacterState } from "@prisma/client";
 import { cn } from "@/lib/utils";
+import { useKeepVideoPlaying } from "@/lib/useKeepVideoPlaying";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 /** Compact circular hero for chat empty-state / header */
@@ -48,6 +49,8 @@ export function HeroBubble({
     void videoRef.current?.play().catch(() => undefined);
   }, [video, src]);
 
+  useKeepVideoPlaying(videoRef, video);
+
   const dim =
     size === "sm"
       ? "h-10 w-10"
@@ -75,8 +78,14 @@ export function HeroBubble({
             loop
             muted
             playsInline
+            preload="auto"
             aria-label={name}
             onError={() => setFailed(true)}
+            onPause={() => {
+              if (document.visibilityState === "visible") {
+                void videoRef.current?.play().catch(() => undefined);
+              }
+            }}
           />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element

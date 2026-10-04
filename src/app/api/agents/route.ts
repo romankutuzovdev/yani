@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { error, json, requireAdmin, writeLog } from "@/lib/api";
+import { readDefaultModel } from "@/llm/pricing";
 import { slugify } from "@/lib/utils";
 
 const agentSchema = z.object({
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest) {
         restrictions: body.restrictions ?? "",
         additionalInstructions: body.additionalInstructions ?? "",
         systemPrompt: body.systemPrompt ?? "",
-        model: body.model ?? process.env.DEEPSEEK_MODEL ?? "deepseek-chat",
+        model: body.model ?? readDefaultModel(),
         temperature: body.temperature ?? 0.7,
         maxIterations: body.maxIterations ?? 10,
         maxTokens: body.maxTokens ?? 4096,

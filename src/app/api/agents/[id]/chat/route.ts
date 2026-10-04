@@ -78,7 +78,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       success: result.success,
       iterations: result.iterations,
       status: result.success ? "SUCCESS" : "ERROR",
-      forms: result.forms ?? [],
     });
   } catch (e) {
     if (e instanceof z.ZodError) return error(e.issues[0]?.message ?? "Invalid input");

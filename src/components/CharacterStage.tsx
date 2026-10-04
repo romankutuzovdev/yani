@@ -11,6 +11,7 @@ import {
 } from "@/characters/CharacterRenderer";
 import type { CharacterState } from "@prisma/client";
 import { cn } from "@/lib/utils";
+import { useKeepVideoPlaying } from "@/lib/useKeepVideoPlaying";
 
 function CharacterMedia({
   asset,
@@ -38,6 +39,8 @@ function CharacterMedia({
     void el.play().catch(() => undefined);
   }, [video, src, state]);
 
+  useKeepVideoPlaying(videoRef, video);
+
   if (video) {
     return (
       <video
@@ -54,6 +57,11 @@ function CharacterMedia({
         playsInline
         preload="auto"
         aria-label={`${name} — ${STATE_LABELS[state]}`}
+        onPause={() => {
+          if (document.visibilityState === "visible") {
+            void videoRef.current?.play().catch(() => undefined);
+          }
+        }}
       />
     );
   }

@@ -28,6 +28,7 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [spent, setSpent] = useState<Record<string, string>>({});
 
   async function load() {
     const res = await fetch("/api/agents");
@@ -37,6 +38,14 @@ export default function AgentsPage() {
 
   useEffect(() => {
     void load();
+    void fetch("/api/llm/usage")
+      .then((r) => r.json())
+      .then((data) => {
+        const map: Record<string, string> = {};
+        for (const row of data.byAgent ?? []) map[row.agentId] = row.costLabel;
+        setSpent(map);
+      })
+      .catch(() => setSpent({}));
   }, []);
 
   async function createAgent() {
@@ -108,6 +117,7 @@ export default function AgentsPage() {
             </p>
             <div className="mt-4 flex gap-4 text-xs text-slate-500">
               <span>{agent.model}</span>
+              <span>{spent[agent.id] ?? "$0"}</span>
               <span>{agent._count.tasks} задач</span>
               <span>{agent._count.memories} память</span>
             </div>

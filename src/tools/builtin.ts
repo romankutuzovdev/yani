@@ -171,39 +171,3 @@ export const webSearchTool: AgentTool = {
     }
   },
 };
-
-export const offerFormTool: AgentTool = {
-  name: "offer_form",
-  description:
-    "Offer the user a web form or page that opens inside the chat as an iframe. Use when the playbook says to show a form for a topic. Pass the exact URL from the playbook.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      url: { type: "string", description: "https:// link to the form or page" },
-      title: { type: "string", description: "Short button/title for the form" },
-      reason: { type: "string", description: "Why this form is offered (shown to the user)" },
-    },
-    required: ["url", "title"],
-  },
-  async execute(input) {
-    const data = input as { url?: string; title?: string; reason?: string };
-    const url = String(data.url ?? "").trim();
-    const title = String(data.title ?? "").trim() || "Форма";
-    if (!url) return fail("url is required");
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      return fail("Invalid URL");
-    }
-    if (!["http:", "https:"].includes(parsed.protocol)) {
-      return fail("Only http/https URLs are allowed");
-    }
-    return ok({
-      url: parsed.toString(),
-      title,
-      reason: data.reason ?? "",
-      openInIframe: true,
-    });
-  },
-};

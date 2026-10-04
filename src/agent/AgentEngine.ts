@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { asStringArray, jsonString } from "@/lib/utils";
 import { createLLMProvider, type LLMProvider, type LLMToolDefinition, type Message } from "@/llm";
+import { estimateUsd, readDefaultModel } from "@/llm/pricing";
 import { ensureToolsRegistered, getTool, getToolsByNames, listTools, type AgentTool } from "@/tools";
 import { registerMemoryTool, formatMemoryForPrompt, getRelevantMemory, writeMemory } from "@/memory";
 import type { Agent, AgentStatus, Skill } from "@prisma/client";
@@ -27,19 +28,12 @@ export interface RunTaskInput {
   signal?: AbortSignal;
 }
 
-export interface OfferedForm {
-  url: string;
-  title: string;
-  reason?: string;
-}
-
 export interface RunTaskResult {
   success: boolean;
   result: string;
   iterations: number;
   error?: string;
   cancelled?: boolean;
-  forms?: OfferedForm[];
 }
 
 const DEFAULT_LIMITS: AgentEngineLimits = {
@@ -49,51 +43,38 @@ const DEFAULT_LIMITS: AgentEngineLimits = {
   maxToolCalls: 20,
 };
 
-const FORM_MARKER_RE = /\[\[form:(https?:\/\/[^\]|]+)(?:\|([^\]]+))?\]\]/gi;
-
-function parseFormMarkers(text: string): OfferedForm[] {
-  const forms: OfferedForm[] = [];
-  for (const match of text.matchAll(FORM_MARKER_RE)) {
-    forms.push({
-      url: match[1],
-      title: (match[2] ?? "Форма").trim() || "Форма",
-    });
-  }
-  return forms;
-}
-
-function stripFormMarkers(text: string): string {
-  return text.replace(FORM_MARKER_RE, "").replace(/\n{3,}/g, "\n\n").trim();
-}
-
 function playbookBlock(agent: Agent): string {
   const playbook = agent.additionalInstructions?.trim();
   if (!playbook) return "";
-  return [
-    "",
-    "=== WORKING PLAYBOOK (follow strictly) ===",
-    playbook,
-    "=== END PLAYBOOK ===",
-    "",
-    "If the playbook says to offer a form/link for a topic the user asks about,",
-    "call the offer_form tool with that exact URL (and a short title).",
-    "You may also include [[form:URL|Title]] in your final answer.",
-    "Do not invent URLs that are not in the playbook.",
-  ].join("\n");
+  return ["", "=== WORKING PLAYBOOK (follow strictly) ===", playbook, "=== END PLAYBOOK ==="].join(
+    "\n",
+  );
 }
 
 function skillPromptBlock(skill: Skill): string {
-  const parts = [`- ${skill.name}: ${skill.description}`];
+  const lines = [
+    `=== НАВЫК «${skill.name}» ===`,
+    "Это активный навык пользователя. Отвечай строго по его промпту.",
+    "Если промпт требует держаться прикреплённого текста — не выходи за него и не дополняй общими знаниями.",
+  ];
+  if (skill.description?.trim() && skill.description.trim() !== skill.name.trim()) {
+    lines.push(`Описание: ${skill.description.trim()}`);
+  }
   if (skill.systemPrompt?.trim()) {
-    parts.push(`  Instructions: ${skill.systemPrompt.trim()}`);
+    lines.push("ОБЩИЙ ПРОМПТ НАВЫКА (выполняй дословно):", skill.systemPrompt.trim());
   }
   if (skill.documentText?.trim()) {
-    const docLabel = skill.documentName?.trim() || "attached document";
-    parts.push(
-      `  Document (${docLabel}):\n---\n${skill.documentText.trim()}\n---\n  Use the document text above according to the skill instructions.`,
+    const label = skill.documentName?.trim() || "прикреплённый текст";
+    lines.push(
+      `ПРИКРЕПЛЁННЫЙ ТЕКСТ (${label}) — источник для ответа:`,
+      "---",
+      skill.documentText.trim(),
+      "---",
+      "Факты бери только из этого текста. Если ответа в тексте нет — прямо скажи, что в тексте этого нет.",
     );
   }
-  return parts.join("\n");
+  lines.push(`=== КОНЕЦ НАВЫКА «${skill.name}» ===`);
+  return lines.join("\n");
 }
 
 function buildSystemPrompt(agent: Agent, skills: Skill[], memoryBlock: string): string {
@@ -145,7 +126,7 @@ export class AgentEngine {
   constructor(llm?: LLMProvider) {
     ensureToolsRegistered();
     registerMemoryTool();
-    this.llm = llm ?? createLLMProvider("deepseek");
+    this.llm = llm ?? createLLMProvider();
   }
 
   async run(input: RunTaskInput): Promise<RunTaskResult> {
@@ -212,16 +193,18 @@ export class AgentEngine {
 
       const skillToolNames = skills.flatMap((s) => asStringArray(s.tools));
       const agentToolNames = agent.tools.filter((t) => t.tool.enabled).map((t) => t.tool.name);
+      const grounded = skills.some((s) => Boolean(s.documentText?.trim()));
       const requested = input.toolNames?.length
         ? input.toolNames
         : Array.from(new Set([...skillToolNames, ...agentToolNames]));
 
-      let tools = getToolsByNames(requested.length ? requested : listTools().map((t) => t.name));
-      if (!tools.length) tools = listTools();
-      // Always allow offering forms from the playbook
-      if (!tools.some((t) => t.name === "offer_form")) {
-        const offer = getTool("offer_form");
-        if (offer) tools = [...tools, offer];
+      let tools = getToolsByNames(requested).filter((t) => t.name !== "offer_form");
+      if (!tools.length && !grounded) {
+        tools = listTools().filter((t) => t.name !== "offer_form");
+      }
+      if (grounded) {
+        const outside = new Set(["web_search", "http_request"]);
+        tools = tools.filter((t) => !outside.has(t.name));
       }
 
       await emit(
@@ -237,21 +220,21 @@ export class AgentEngine {
       });
       const memoryBlock = formatMemoryForPrompt(memory);
 
+      const skillModel =
+        skills.length === 1 && skills[0]?.model?.trim() ? skills[0].model.trim() : "";
+      const taskTail = skills.some((s) => s.documentText?.trim() || s.systemPrompt?.trim())
+        ? "Ответь в рамках общего промпта активного навыка. Если к навыку прикреплён текст — опирайся только на него."
+        : "Дай лучший итоговый ответ. Используй инструменты, если это помогает.";
+
       const messages: Message[] = [
         { role: "system", content: buildSystemPrompt(agent, skills, memoryBlock) },
         {
           role: "user",
-          content: `Задача:\n${input.instruction}\n\nДай лучший итоговый ответ. Используй инструменты, если это помогает.`,
+          content: `Задача:\n${input.instruction}\n\n${taskTail}`,
         },
       ];
 
       let finalResult = "";
-      const offeredForms: OfferedForm[] = [];
-      const pushForm = (form: OfferedForm) => {
-        if (!offeredForms.some((f) => f.url === form.url)) {
-          offeredForms.push(form);
-        }
-      };
 
       while (iterations < limits.maxIterations) {
         if (controller.signal.aborted) {
@@ -271,7 +254,7 @@ export class AgentEngine {
         await emit("iteration", `Итерация ${iterations}`);
 
         const response = await this.llm.chat(messages, {
-          model: agent.model,
+          model: skillModel || agent.model || readDefaultModel(),
           temperature: agent.temperature,
           maxTokens: limits.maxTokens,
           tools: toToolDefs(tools),
@@ -287,8 +270,7 @@ export class AgentEngine {
               inputTokens: response.usage.inputTokens,
               outputTokens: response.usage.outputTokens,
               totalTokens: response.usage.totalTokens,
-              // TODO: accurate pricing table per model
-              estimatedCost: 0,
+              estimatedCost: await estimateUsd(response.model || skillModel || agent.model, response.usage),
               requestType: "agent_run",
             },
           });
@@ -335,21 +317,6 @@ export class AgentEngine {
                   signal: controller.signal,
                 });
                 toolResultText = JSON.stringify(result);
-                if (
-                  result.success &&
-                  call.name === "offer_form" &&
-                  result.output &&
-                  typeof result.output === "object"
-                ) {
-                  const d = result.output as { url?: string; title?: string; reason?: string };
-                  if (d.url) {
-                    pushForm({
-                      url: d.url,
-                      title: d.title ?? "Форма",
-                      reason: d.reason,
-                    });
-                  }
-                }
                 await emit(
                   result.success ? "tool_result" : "tool_error",
                   result.success
@@ -377,15 +344,12 @@ export class AgentEngine {
         }
 
         finalResult = response.content?.trim() || "Ответ не сформирован.";
-        for (const form of parseFormMarkers(finalResult)) pushForm(form);
-        const cleanResult = stripFormMarkers(finalResult) || finalResult;
         await emit("final_result", "Задача завершена", {
-          preview: cleanResult.slice(0, 500),
-          forms: offeredForms,
+          preview: finalResult.slice(0, 500),
         });
         await writeMemory({
           agentId: agent.id,
-          content: `Результат задачи: ${cleanResult.slice(0, 2000)}`,
+          content: `Результат задачи: ${finalResult.slice(0, 2000)}`,
           type: "TASK",
           taskId: input.taskId,
           userId: input.userId,
@@ -394,9 +358,8 @@ export class AgentEngine {
         await setStatus("SUCCESS", "Задача выполнена");
         return {
           success: true,
-          result: cleanResult,
+          result: finalResult,
           iterations,
-          forms: offeredForms,
         };
       }
 

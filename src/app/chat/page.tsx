@@ -4,16 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { HeroBubble } from "@/components/HeroBubble";
 import type { CharacterAssetView } from "@/characters/CharacterRenderer";
-import {
-  ArrowLeft,
-  ArrowUp,
-  ExternalLink,
-  History,
-  Menu,
-  MessageSquarePlus,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { ArrowUp, History, Menu, MessageSquarePlus, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type SkillTile = {
@@ -37,12 +28,9 @@ type AgentCard = {
   skills: SkillTile[];
 };
 
-type OfferedForm = { url: string; title: string; reason?: string };
-
 type ChatMsg = {
   role: "user" | "assistant" | "system";
   content: string;
-  forms?: OfferedForm[];
 };
 
 type ChatSession = {
@@ -78,7 +66,6 @@ export default function ClientChatPage() {
   const [sessionId, setSessionId] = useState(
     () => `client-${Math.random().toString(36).slice(2)}`,
   );
-  const [activeForm, setActiveForm] = useState<OfferedForm | null>(null);
   const [activeSkillId, setActiveSkillId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -86,6 +73,7 @@ export default function ClientChatPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setSessions(loadHistory());
@@ -140,26 +128,29 @@ export default function ClientChatPage() {
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, [input]);
 
-  // Keep layout stable when mobile keyboard opens (iOS visualViewport)
+  // Keyboard: only interactive-widget=resizes-content + h-dvh.
+  // Do not pin/translate the shell to visualViewport — that double-moves
+  // the composer and looks like a jump when the field is focused.
   useEffect(() => {
-    const root = document.documentElement;
-    const vv = window.visualViewport;
-    if (!vv) return;
+    const html = document.documentElement;
+    const body = document.body;
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+    };
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
 
-    function sync() {
-      const offset = Math.max(0, window.innerHeight - vv!.height - vv!.offsetTop);
-      root.style.setProperty("--kb-offset", `${offset}px`);
-      root.style.setProperty("--vv-height", `${vv!.height}px`);
+    const shell = shellRef.current;
+    if (shell) {
+      shell.style.top = "";
+      shell.style.height = "";
+      shell.style.transform = "";
     }
 
-    sync();
-    vv.addEventListener("resize", sync);
-    vv.addEventListener("scroll", sync);
     return () => {
-      vv.removeEventListener("resize", sync);
-      vv.removeEventListener("scroll", sync);
-      root.style.removeProperty("--kb-offset");
-      root.style.removeProperty("--vv-height");
+      html.style.overflow = prev.htmlOverflow;
+      body.style.overflow = prev.bodyOverflow;
     };
   }, []);
 
@@ -231,12 +222,10 @@ export default function ClientChatPage() {
           { role: "assistant", content: data.error ?? "Не удалось получить ответ" },
         ];
       } else {
-        const forms = (data.forms ?? []) as OfferedForm[];
         next = [
           ...withUser,
-          { role: "assistant", content: data.reply ?? "Пустой ответ", forms },
+          { role: "assistant", content: data.reply ?? "Пустой ответ" },
         ];
-        if (forms[0]) setActiveForm(forms[0]);
       }
       setMessages(next);
       persistSession(next);
@@ -261,8 +250,8 @@ export default function ClientChatPage() {
 
   return (
     <div
-      className="relative flex flex-col overflow-hidden bg-white text-slate-900"
-      style={{ height: "var(--vv-height, 100dvh)" }}
+      ref={shellRef}
+      className="fixed inset-x-0 top-0 flex h-dvh flex-col overflow-hidden bg-white text-slate-900"
     >
       {/* Header — never scrolls away */}
       <header className="z-30 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-yani-ring/40 bg-white px-5 sm:h-16 sm:px-6">
@@ -346,16 +335,21 @@ export default function ClientChatPage() {
         {!hasConversation ? (
           <section className="flex flex-col items-center justify-start pb-4 text-center">
             <h1 className="mt-2 text-xl font-medium tracking-tight text-slate-900 sm:mt-4 sm:text-3xl">
-              Чем я могу помочь?
+              {greeting}
             </h1>
-            {agent?.statusMessage && (
-              <p className="mt-1.5 max-w-sm px-2 text-xs text-slate-500 sm:mt-2 sm:text-sm">
-                {agent.statusMessage}
+            {agent?.description?.trim() && (
+              <p className="mt-2 max-w-lg px-2 text-sm leading-relaxed text-slate-500">
+                {agent.description.trim()}
+              </p>
+            )}
+            {activeSkill?.description?.trim() && (
+              <p className="mt-2 max-w-lg px-2 text-sm leading-relaxed text-slate-600">
+                {activeSkill.description.trim()}
               </p>
             )}
 
             <div className="mt-6 w-full pb-4 sm:mt-8">
-              <div className="mb-2.5 flex flex-col items-center gap-2.5 sm:mb-3 sm:gap-3">
+              <div className="relative mb-2.5 flex h-7 items-center justify-center sm:mb-3 sm:h-8">
                 <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-slate-400 sm:text-sm">
                   <Sparkles size={14} className="text-slate-400" />
                   Навыки
@@ -364,12 +358,15 @@ export default function ClientChatPage() {
                   <button
                     type="button"
                     onClick={() => setActiveSkillId(null)}
-                    className="inline-flex items-center gap-1.5 text-xs text-slate-400 active:text-slate-500"
+                    aria-label="Все навыки"
+                    className="absolute right-0 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center text-slate-500 active:text-slate-800 sm:h-8 sm:w-8"
                   >
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 text-slate-400">
-                      <ArrowLeft size={13} />
-                    </span>
-                    Все навыки
+                    <svg viewBox="0 0 24 24" className="h-4 w-4 sm:h-[18px] sm:w-[18px]" aria-hidden>
+                      <path
+                        fill="currentColor"
+                        d="M12.2 5.1A6.9 6.9 0 1 0 18.6 16a1.35 1.35 0 1 0-2.2-1.55A4.2 4.2 0 1 1 12.15 7.8h.15l-1.15 1.15a1.35 1.35 0 0 0 1.91 1.91l3.05-3.05a1.35 1.35 0 0 0 0-1.91L13.06 2.85a1.35 1.35 0 1 0-1.91 1.91l1.05 1.05v.29Z"
+                      />
+                    </svg>
                   </button>
                 )}
               </div>
@@ -422,20 +419,6 @@ export default function ClientChatPage() {
                   )}
                 >
                   <div className="whitespace-pre-wrap break-words">{m.content}</div>
-                  {!!m.forms?.length && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {m.forms.map((form) => (
-                        <button
-                          key={form.url}
-                          type="button"
-                          onClick={() => setActiveForm(form)}
-                          className="rounded-xl bg-white px-3 py-2 text-xs font-medium text-yani-ink shadow-sm ring-1 ring-yani-ring/50"
-                        >
-                          Открыть: {form.title}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
               ))}
               {busy && (
@@ -600,45 +583,6 @@ export default function ClientChatPage() {
         </div>
       )}
 
-      {activeForm && (
-        <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/40 p-0 sm:items-center sm:p-8">
-          <div className="flex h-dvh w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl sm:h-[85vh] sm:rounded-3xl">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
-              <div className="min-w-0">
-                <p className="truncate font-medium text-slate-900">{activeForm.title}</p>
-                {activeForm.reason && (
-                  <p className="truncate text-xs text-slate-500">{activeForm.reason}</p>
-                )}
-              </div>
-              <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-                <a
-                  href={activeForm.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-10 items-center gap-1 rounded-xl border border-slate-200 px-2.5 text-xs text-yani-ink active:bg-yani-soft sm:px-3"
-                >
-                  <ExternalLink size={14} />
-                  <span className="hidden xs:inline sm:inline">Вкладка</span>
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setActiveForm(null)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 active:bg-slate-50"
-                  aria-label="Закрыть"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            </div>
-            <iframe
-              title={activeForm.title}
-              src={activeForm.url}
-              className="h-full w-full flex-1 bg-white"
-              referrerPolicy="no-referrer-when-downgrade"
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
