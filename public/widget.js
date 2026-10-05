@@ -103,6 +103,10 @@
       ";color:" +
       fg +
       "}" +
+      ".yani-limit{align-self:stretch;margin:4px 0;padding:18px 16px;border-radius:18px;text-align:center;background:#f5f3ff;border:1px solid #ddd6fe;color:#1e1b4b}" +
+      ".yani-limit b{display:block;font-size:15px;font-weight:650;margin:0 0 6px}" +
+      ".yani-limit span{display:block;font-size:13px;line-height:1.45;color:#64748b;font-weight:400}" +
+      ".yani-btn{display:block;margin-top:8px;padding:10px 14px;border-radius:12px;background:#6d28d9;color:#fff;text-decoration:none;font-weight:650;text-align:center}" +
       ".yani-foot{display:flex;gap:8px;padding:12px;border-top:1px solid " +
       border +
       ";background:" +
@@ -169,10 +173,46 @@
     toggle(false);
   });
 
+  function splitButtons(raw) {
+    var buttons = [];
+    var text = String(raw || "").replace(
+      /\[\[кнопка:\s*([^|\]]+?)\s*\|\s*(https?:\/\/[^\]\s]+)\s*\]\]/gi,
+      function (_m, label, href) {
+        var name = String(label || "").trim();
+        if (!name) return _m;
+        buttons.push({ label: name, href: href });
+        return "";
+      },
+    );
+    return { text: text.replace(/\n{3,}/g, "\n\n").trim(), buttons: buttons };
+  }
+
+  function paintReply(bubble, raw, streaming) {
+    var source = streaming ? String(raw || "").replace(/\[\[кнопка:[^\]]*$/i, "") : raw;
+    var parsed = splitButtons(source);
+    bubble.textContent = "";
+    if (parsed.text) {
+      bubble.appendChild(document.createTextNode(parsed.text));
+    } else if (!parsed.buttons.length) {
+      bubble.appendChild(document.createTextNode(streaming ? "Думаю…" : "Пустой ответ"));
+    }
+    parsed.buttons.forEach(function (button) {
+      var link = document.createElement("a");
+      link.className = "yani-btn";
+      link.href = button.href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = button.label;
+      bubble.appendChild(link);
+    });
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
   function addMsg(role, text) {
     var el = document.createElement("div");
     el.className = "yani-msg " + (role === "user" ? "user" : "bot");
-    el.textContent = text;
+    if (role === "user") el.textContent = text;
+    else paintReply(el, text, false);
     msgs.appendChild(el);
     msgs.scrollTop = msgs.scrollHeight;
   }
@@ -304,6 +344,26 @@
       console.error("[Yani Widget]", err);
     });
 
+  function showLimit(bubble, code) {
+    var month = code === "monthly_limit";
+    bubble.className = "yani-limit";
+    bubble.textContent = "";
+    var title = document.createElement("b");
+    title.textContent = month
+      ? "Лимит запросов на месяц исчерпан"
+      : "Лимит запросов на сегодня исчерпан";
+    var note = document.createElement("span");
+    note.textContent = month
+      ? "В этом месяце новые сообщения больше не принимаются. Лимит обновится в начале следующего месяца."
+      : "На сегодня сообщения закончились. Завтра можно будет написать снова.";
+    bubble.appendChild(title);
+    bubble.appendChild(note);
+    input.disabled = true;
+    sendBtn.disabled = true;
+    sub.textContent = "Лимит исчерпан";
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
   function send() {
     var text = (input.value || "").trim();
     if (!text || busy || !resolvedAgentId) return;
@@ -329,9 +389,13 @@
     })
       .then(function (r) {
         var ctype = r.headers.get("content-type") || "";
-        if (!ctype.includes("text/event-stream") || !r.body) {
+          if (!ctype.includes("text/event-stream") || !r.body) {
           return r.json().then(function (data) {
-            bubble.textContent = data.reply || data.error || "Нет ответа";
+            if (data.code === "monthly_limit" || data.code === "daily_limit") {
+              showLimit(bubble, data.code);
+              return;
+            }
+            paintReply(bubble, data.reply || data.error || "Нет ответа", false);
             sub.textContent = data.success === false ? "Ошибка" : "Онлайн";
           });
         }
@@ -342,7 +406,7 @@
         function pump() {
           return reader.read().then(function (chunk) {
             if (chunk.done) {
-              bubble.textContent = acc.trim() || "Пустой ответ";
+              paintReply(bubble, acc.trim(), false);
               sub.textContent = "Онлайн";
               return;
             }
@@ -367,8 +431,7 @@
               }
               if (data.delta) {
                 acc += data.delta;
-                bubble.textContent = acc;
-                msgs.scrollTop = msgs.scrollHeight;
+                paintReply(bubble, acc, true);
               }
               if (data.error) acc = acc || data.error;
               if (data.done && data.reply) acc = data.reply;

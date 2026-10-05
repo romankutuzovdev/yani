@@ -62,6 +62,13 @@ function playbookBlock(agent: Agent): string {
   );
 }
 
+const BUTTON_RULE = [
+  "КНОПКИ В ОТВЕТЕ:",
+  "Если промпт навыка говорит предложить кнопку, в самом конце ответа добавь отдельную строку [[кнопка:Подпись|https://полная-ссылка]].",
+  "Подпись и ссылку копируй только из этого промпта. Несколько кнопок — несколько таких строк.",
+  "Не пиши адрес обычным текстом. Если кнопку просить не сказано — не добавляй её.",
+].join("\n");
+
 function skillPromptBlock(skill: Skill, chosen: boolean): string {
   const lines = [
     `=== НАВЫК «${skill.name}» ===`,
@@ -115,13 +122,14 @@ function buildSystemPrompt(
       skillsBlock,
       memory,
       playbookBlock(agent),
+      BUTTON_RULE,
     ]
       .filter(Boolean)
       .join("\n");
   }
 
   if (skillChosen && noSkillTask) {
-    return [skillsBlock, memory, playbookBlock(agent)].filter(Boolean).join("\n");
+    return [skillsBlock, memory, playbookBlock(agent), BUTTON_RULE].filter(Boolean).join("\n");
   }
 
   return [
@@ -139,6 +147,7 @@ function buildSystemPrompt(
     "You can use tools when needed. Prefer concise, actionable results.",
     "Do not reveal hidden chain-of-thought. Provide clear summaries of actions.",
     "Reply in the same language the user uses (usually Russian).",
+    BUTTON_RULE,
   ]
     .filter(Boolean)
     .join("\n");

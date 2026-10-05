@@ -5,6 +5,7 @@ import Link from "next/link";
 import { HeroBubble } from "@/components/HeroBubble";
 import type { CharacterAssetView } from "@/characters/CharacterRenderer";
 import { ArrowUp, History, Menu, MessageSquarePlus, Sparkles, Trash2, X } from "lucide-react";
+import { hideOpenButtonToken, splitReplyButtons } from "@/lib/replyButtons";
 import { cn } from "@/lib/utils";
 
 type SkillTile = {
@@ -31,6 +32,7 @@ type AgentCard = {
 type ChatMsg = {
   role: "user" | "assistant" | "system";
   content: string;
+  limit?: "month" | "day";
 };
 
 type ChatSession = {
@@ -169,6 +171,7 @@ export default function ClientChatPage() {
   );
 
   const hasConversation = messages.some((m) => m.role === "user");
+  const limitLocked = messages.some((m) => m.limit === "month" || m.limit === "day");
   const greeting = agent?.greeting || "Чем я могу помочь?";
 
   function persistSession(nextMessages: ChatMsg[]) {
@@ -243,6 +246,19 @@ export default function ClientChatPage() {
       const ctype = res.headers.get("content-type") ?? "";
       if (!ctype.includes("text/event-stream") || !res.body) {
         const data = await res.json().catch(() => ({}));
+        if (data.code === "monthly_limit" || data.code === "daily_limit") {
+          const next: ChatMsg[] = [
+            ...withUser,
+            {
+              role: "assistant",
+              content: "",
+              limit: data.code === "monthly_limit" ? "month" : "day",
+            },
+          ];
+          setMessages(next);
+          persistSession(next);
+          return;
+        }
         const next: ChatMsg[] = [
           ...withUser,
           {
@@ -472,8 +488,28 @@ export default function ClientChatPage() {
           <section className="flex flex-col pb-2">
             <div className="space-y-3 sm:space-y-4">
               {messages.map((m, i) => {
+                if (m.limit) {
+                  const month = m.limit === "month";
+                  return (
+                    <div
+                      key={i}
+                      className="mx-auto w-full max-w-md rounded-3xl border border-violet-200 bg-gradient-to-b from-violet-50 to-white px-5 py-6 text-center shadow-sm"
+                    >
+                      <p className="text-base font-semibold text-slate-900">
+                        {month ? "Лимит запросов на месяц исчерпан" : "Лимит запросов на сегодня исчерпан"}
+                      </p>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-500">
+                        {month
+                          ? "В этом месяце новые сообщения больше не принимаются. Лимит обновится в начале следующего месяца."
+                          : "На сегодня сообщения закончились. Завтра можно будет написать снова."}
+                      </p>
+                    </div>
+                  );
+                }
                 const typing = busy && i === messages.length - 1 && m.role === "assistant";
-                const text = m.content || (typing ? "Думаю…" : "");
+                const raw = m.content || (typing ? "Думаю…" : "");
+                const parsed =
+                  m.role === "assistant" ? splitReplyButtons(hideOpenButtonToken(raw)) : { text: raw, buttons: [] };
                 return (
                   <div
                     key={i}
@@ -484,12 +520,29 @@ export default function ClientChatPage() {
                         : "bg-yani-soft/70 text-slate-800",
                     )}
                   >
-                    <div className="whitespace-pre-wrap break-words">
-                      {text}
-                      {typing && m.content ? (
-                        <span className="ml-0.5 inline-block animate-pulse text-yani-deep">▍</span>
-                      ) : null}
-                    </div>
+                    {parsed.text ? (
+                      <div className="whitespace-pre-wrap break-words">
+                        {parsed.text}
+                        {typing && m.content ? (
+                          <span className="ml-0.5 inline-block animate-pulse text-yani-deep">▍</span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {parsed.buttons.length ? (
+                      <div className={cn("flex flex-col gap-2", parsed.text && "mt-3")}>
+                        {parsed.buttons.map((button) => (
+                          <a
+                            key={button.label + button.href}
+                            href={button.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="rounded-xl bg-violet-600 px-3 py-2.5 text-center text-sm font-medium text-white hover:bg-violet-500"
+                          >
+                            {button.label}
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
@@ -531,14 +584,16 @@ export default function ClientChatPage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
               rows={1}
-              placeholder={greeting}
-              disabled={!agent || busy}
+              placeholder={
+                limitLocked ? "Лимит запросов исчерпан" : greeting
+              }
+              disabled={!agent || busy || limitLocked}
               enterKeyHint="send"
               className="max-h-[120px] min-h-[40px] w-full flex-1 resize-none bg-transparent px-2 py-2 text-base leading-snug outline-none placeholder:text-slate-400 sm:min-h-[44px] sm:text-[15px]"
             />
             <button
               type="submit"
-              disabled={!agent || busy || !input.trim()}
+              disabled={!agent || busy || limitLocked || !input.trim()}
               className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-yani-deep text-white transition active:bg-yani-mid disabled:bg-slate-200 disabled:text-slate-400 sm:h-10 sm:w-10"
               aria-label="Отправить"
             >

@@ -209,10 +209,14 @@ export default function SkillsPage() {
           <textarea
             className={fieldClass}
             rows={6}
-            placeholder="Например: отвечай только в рамках этого описания"
+            placeholder="Например: если пользователь хочет оставить заявку, предложи [[кнопка:Заявка|https://yani.by/f/zayavka]]"
             value={form.systemPrompt}
             onChange={(e) => setForm({ ...form, systemPrompt: e.target.value })}
           />
+          <span className="mt-1 block text-xs leading-relaxed text-slate-500">
+            Кнопка: напишите, когда её показать, и вставьте [[кнопка:Подпись|https://ссылка]]. Для другого вопроса —
+            отдельная строка со своей подписью и ссылкой.
+          </span>
         </label>
         <label className="mt-3 block text-sm text-slate-700">
           Модель навыка
@@ -311,9 +315,14 @@ export default function SkillsPage() {
                   <textarea
                     className={fieldClass}
                     rows={6}
+                    placeholder="Если пользователь хочет оставить заявку, предложи [[кнопка:Заявка|https://yani.by/f/zayavka]]"
                     value={edit.systemPrompt}
                     onChange={(e) => setEdit({ ...edit, systemPrompt: e.target.value })}
                   />
+                  <span className="mt-1 block text-xs leading-relaxed text-slate-500">
+                    Кнопка: [[кнопка:Подпись|https://ссылка]]. В промпте опишите, при каком вопросе какую кнопку
+                    предложить.
+                  </span>
                 </label>
                 <label className="block text-sm text-slate-700">
                   Модель навыка

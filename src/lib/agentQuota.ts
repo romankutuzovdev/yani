@@ -26,7 +26,9 @@ export function requestUsage(agent: {
 }
 
 /** Counts one public chat. Returns a refusal when the day or month limit is already spent. */
-export async function takeAgentRequestSlot(agentId: string): Promise<{ ok: true } | { ok: false; message: string }> {
+export async function takeAgentRequestSlot(
+  agentId: string,
+): Promise<{ ok: true } | { ok: false; code: "monthly_limit" | "daily_limit" | "missing"; message: string }> {
   const agent = await prisma.agent.findUnique({
     where: { id: agentId },
     select: {
@@ -38,17 +40,17 @@ export async function takeAgentRequestSlot(agentId: string): Promise<{ ok: true 
       requestCountMonthKey: true,
     },
   });
-  if (!agent) return { ok: false, message: "Агент не найден." };
+  if (!agent) return { ok: false, code: "missing", message: "Агент не найден." };
 
   const { dayKey, monthKey } = requestPeriodKeys();
   const today = agent.requestCountDayKey === dayKey ? agent.requestCountDay : 0;
   const month = agent.requestCountMonthKey === monthKey ? agent.requestCountMonth : 0;
 
   if (agent.monthlyRequestLimit > 0 && month >= agent.monthlyRequestLimit) {
-    return { ok: false, message: "Лимит запросов на этот месяц исчерпан." };
+    return { ok: false, code: "monthly_limit", message: "Лимит запросов на месяц исчерпан." };
   }
   if (agent.dailyRequestLimit > 0 && today >= agent.dailyRequestLimit) {
-    return { ok: false, message: "Лимит запросов на сегодня исчерпан." };
+    return { ok: false, code: "daily_limit", message: "Лимит запросов на сегодня исчерпан." };
   }
 
   await prisma.agent.update({

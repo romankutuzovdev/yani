@@ -96,7 +96,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const slot = await enqueueMilli(() => takeAgentRequestSlot(agentId));
     if (!slot.ok) {
-      const denied = error(slot.message, 429);
+      const denied = error(slot.message, 429, { code: slot.code });
       Object.entries(corsHeaders(origin)).forEach(([k, v]) => denied.headers.set(k, v));
       return denied;
     }
