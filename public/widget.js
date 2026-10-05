@@ -63,10 +63,8 @@
       ":host{all:initial}" +
       ".yani-fab{position:fixed;" +
       s +
-      ":16px;bottom:16px;z-index:2147483000;min-width:56px;height:56px;padding:0 18px;border-radius:999px;border:0;cursor:pointer;background:" +
-      userBg +
-      ";box-shadow:0 10px 30px rgba(15,23,42,.25);color:#fff;font:600 14px/1 system-ui,-apple-system,sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:8px}" +
-      ".yani-fab img,.yani-fab video{width:28px;height:28px;border-radius:999px;object-fit:contain;background:rgba(255,255,255,.2)}" +
+      ":16px;bottom:16px;z-index:2147483000;width:68px;height:68px;padding:0;border-radius:999px;border:3px solid #fff;cursor:pointer;background:#fff;box-shadow:0 10px 30px rgba(15,23,42,.28);overflow:hidden;display:inline-flex;align-items:center;justify-content:center}" +
+      ".yani-fab-hero{width:100%;height:100%;object-fit:cover;display:block;background:#fff}" +
       ".yani-panel{position:fixed;" +
       s +
       ":16px;bottom:84px;z-index:2147483000;width:min(380px,calc(100vw - 24px));height:min(560px,calc(100vh - 110px));border-radius:20px;overflow:hidden;background:" +
@@ -127,7 +125,7 @@
   }
 
   root.innerHTML =
-    '<button class="yani-fab" type="button" aria-label="Открыть чат"><span class="yani-fab-label">Чат</span></button>' +
+    '<button class="yani-fab" type="button" aria-label="Открыть чат"></button>' +
     '<div class="yani-panel" role="dialog" aria-label="Чат с AI-агентом">' +
     '  <div class="yani-head">' +
     '    <div class="yani-avatar-wrap"></div>' +
@@ -144,7 +142,6 @@
   paint();
 
   var fab = root.querySelector(".yani-fab");
-  var fabLabel = root.querySelector(".yani-fab-label");
   var panel = root.querySelector(".yani-panel");
   var msgs = root.querySelector(".yani-msgs");
   var input = root.querySelector(".yani-input");
@@ -209,6 +206,30 @@
     return /\.(webm|mp4|ogv|ogg)(\?|$)/i.test(asset.url || "");
   }
 
+  function setFab(asset, logoUrl) {
+    if (!fab) return;
+    var url = (asset && asset.url) || logoUrl || "";
+    fab.textContent = "";
+    if (!url) return;
+    var src = url.indexOf("http") === 0 ? url : base + url;
+    if (asset && isVideoAsset(asset)) {
+      var video = document.createElement("video");
+      video.className = "yani-fab-hero";
+      video.src = src;
+      video.autoplay = true;
+      video.loop = true;
+      video.muted = true;
+      video.setAttribute("playsinline", "");
+      fab.appendChild(video);
+      return;
+    }
+    var img = document.createElement("img");
+    img.className = "yani-fab-hero";
+    img.alt = "";
+    img.src = src;
+    fab.appendChild(img);
+  }
+
   function setAvatar(asset, logoUrl) {
     if (!avatarWrap) return;
     var url = (asset && asset.url) || logoUrl || "";
@@ -250,7 +271,8 @@
     paint();
     title.textContent = agent.name || "Агент";
     sub.textContent = agent.statusMessage || "Онлайн";
-    fabLabel.textContent = cfg.buttonLabel || "Чат";
+    var hero = pickAsset(agent, "IDLE");
+    setFab(hero, agent.logoUrl);
     setAvatar(pickAsset(agent, agent.status), agent.logoUrl);
     if (!msgs.childElementCount) addMsg("bot", cfg.greeting);
   }
@@ -294,20 +316,71 @@
     var headers = { "Content-Type": "application/json" };
     if (apiKey) headers.Authorization = "Bearer " + apiKey;
 
+    var bubble = document.createElement("div");
+    bubble.className = "yani-msg bot";
+    bubble.textContent = "Думаю…";
+    msgs.appendChild(bubble);
+    msgs.scrollTop = msgs.scrollHeight;
+
     fetch(base + "/api/v1/agents/" + encodeURIComponent(resolvedAgentId) + "/chat", {
       method: "POST",
       headers: headers,
-      body: JSON.stringify({ message: text, sessionId: sessionId }),
+      body: JSON.stringify({ message: text, sessionId: sessionId, stream: true }),
     })
       .then(function (r) {
-        return r.json();
-      })
-      .then(function (data) {
-        addMsg("bot", data.reply || data.error || "Нет ответа");
-        sub.textContent = data.success === false ? "Ошибка" : "Онлайн";
+        var ctype = r.headers.get("content-type") || "";
+        if (!ctype.includes("text/event-stream") || !r.body) {
+          return r.json().then(function (data) {
+            bubble.textContent = data.reply || data.error || "Нет ответа";
+            sub.textContent = data.success === false ? "Ошибка" : "Онлайн";
+          });
+        }
+        var reader = r.body.getReader();
+        var decoder = new TextDecoder();
+        var buf = "";
+        var acc = "";
+        function pump() {
+          return reader.read().then(function (chunk) {
+            if (chunk.done) {
+              bubble.textContent = acc.trim() || "Пустой ответ";
+              sub.textContent = "Онлайн";
+              return;
+            }
+            buf += decoder.decode(chunk.value, { stream: true });
+            var parts = buf.split("\n\n");
+            buf = parts.pop() || "";
+            parts.forEach(function (part) {
+              var line = part
+                .split("\n")
+                .map(function (l) {
+                  return l.trim();
+                })
+                .find(function (l) {
+                  return l.indexOf("data:") === 0;
+                });
+              if (!line) return;
+              var data;
+              try {
+                data = JSON.parse(line.slice(5).trim());
+              } catch (e) {
+                return;
+              }
+              if (data.delta) {
+                acc += data.delta;
+                bubble.textContent = acc;
+                msgs.scrollTop = msgs.scrollHeight;
+              }
+              if (data.error) acc = acc || data.error;
+              if (data.done && data.reply) acc = data.reply;
+              if (data.done) sub.textContent = data.success === false ? "Ошибка" : "Онлайн";
+            });
+            return pump();
+          });
+        }
+        return pump();
       })
       .catch(function () {
-        addMsg("bot", "Сетевая ошибка");
+        bubble.textContent = "Сетевая ошибка";
         sub.textContent = "Ошибка";
       })
       .finally(function () {

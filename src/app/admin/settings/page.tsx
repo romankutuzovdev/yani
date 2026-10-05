@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { ModelSelect } from "@/components/ModelSelect";
 
 type Usage = {
@@ -89,7 +90,7 @@ export default function SettingsPage() {
         <h2 className="font-medium text-slate-900">Какую модель использовать</h2>
         <p className="mt-1 text-sm text-slate-500">
           Это модель для новых агентов. Уже созданным агентам модель задаётся отдельно на странице агента.
-          В списке цена: вход / выход за 1 млн токенов.
+          Выберите модель из списка. Цена в пункте: вход / выход за 1 млн токенов. Свой id можно вписать отдельно.
         </p>
         <div className="mt-3 max-w-xl">
           <ModelSelect value={model} onChange={setModel} />
@@ -120,6 +121,14 @@ export default function SettingsPage() {
       </section>
 
       {usageError && <p className="text-sm text-rose-600">{usageError}</p>}
+
+      <p className="text-sm text-slate-500">
+        Полный отчёт по токенам, агентам и каждому запросу — на странице{" "}
+        <Link href="/admin/analytics" className="font-medium text-violet-700 hover:underline">
+          Аналитика
+        </Link>
+        .
+      </p>
 
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="mb-1 font-medium text-slate-900">Потрачено по моделям</h2>

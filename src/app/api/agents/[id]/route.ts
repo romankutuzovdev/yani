@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { error, json, requireAdmin, writeLog } from "@/lib/api";
+import { requestUsage } from "@/lib/agentQuota";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -24,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     },
   });
   if (!agent) return error("Agent not found", 404);
-  return json({ agent });
+  return json({ agent: { ...agent, ...requestUsage(agent) } });
 }
 
 const updateSchema = z.object({
@@ -45,6 +46,8 @@ const updateSchema = z.object({
   maxIterations: z.number().int().min(1).max(50).optional(),
   maxTokens: z.number().int().optional(),
   timeoutMs: z.number().int().optional(),
+  dailyRequestLimit: z.number().int().min(0).max(1_000_000).optional(),
+  monthlyRequestLimit: z.number().int().min(0).max(1_000_000).optional(),
   enabled: z.boolean().optional(),
   skillIds: z.array(z.string()).optional(),
   /** Full assignment with order/visibility for the agent */

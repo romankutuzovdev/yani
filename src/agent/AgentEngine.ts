@@ -1,9 +1,18 @@
 import { prisma } from "@/lib/db";
 import { asStringArray, jsonString } from "@/lib/utils";
-import { createLLMProvider, type LLMProvider, type LLMToolDefinition, type Message } from "@/llm";
+import {
+  createLLMProvider,
+  type LLMOptions,
+  type LLMProvider,
+  type LLMResponse,
+  type LLMToolCall,
+  type LLMToolDefinition,
+  type Message,
+} from "@/llm";
 import { estimateUsd, readDefaultModel } from "@/llm/pricing";
 import { ensureToolsRegistered, getTool, getToolsByNames, listTools, type AgentTool } from "@/tools";
 import { registerMemoryTool, formatMemoryForPrompt, getRelevantMemory, writeMemory } from "@/memory";
+import { enqueueMilli } from "@/lib/milliQueue";
 import type { Agent, AgentStatus, Skill } from "@prisma/client";
 
 export interface AgentEngineLimits {
@@ -25,6 +34,8 @@ export interface RunTaskInput {
   limits?: Partial<AgentEngineLimits>;
   onStatus?: (status: AgentStatus, message?: string) => Promise<void> | void;
   onEvent?: (event: { type: string; summary: string; data?: unknown }) => Promise<void> | void;
+  /** Called as soon as the model emits visible text, before the full reply is ready. */
+  onDelta?: (delta: string) => void;
   signal?: AbortSignal;
 }
 
@@ -51,11 +62,13 @@ function playbookBlock(agent: Agent): string {
   );
 }
 
-function skillPromptBlock(skill: Skill): string {
+function skillPromptBlock(skill: Skill, chosen: boolean): string {
   const lines = [
     `=== НАВЫК «${skill.name}» ===`,
-    "Это активный навык пользователя. Отвечай строго по его промпту.",
-    "Если промпт требует держаться прикреплённого текста — не выходи за него и не дополняй общими знаниями.",
+    chosen
+      ? "Пользователь выбрал этот навык. Отвечай строго по его промпту."
+      : "Навык не выбран. Это один из доступных материалов, не отдельный режим ответа.",
+    "Если промпт навыка требует держаться прикреплённого текста — не выходи за него и не дополняй общими знаниями.",
   ];
   if (skill.description?.trim() && skill.description.trim() !== skill.name.trim()) {
     lines.push(`Описание: ${skill.description.trim()}`);
@@ -77,16 +90,38 @@ function skillPromptBlock(skill: Skill): string {
   return lines.join("\n");
 }
 
-function buildSystemPrompt(agent: Agent, skills: Skill[], memoryBlock: string): string {
+function buildSystemPrompt(
+  agent: Agent,
+  skills: Skill[],
+  memoryBlock: string,
+  skillChosen: boolean,
+): string {
   const skillsBlock = skills.length
-    ? `\nActive skills:\n${skills.map((s) => skillPromptBlock(s)).join("\n")}`
+    ? [
+        "",
+        skillChosen ? "ВЫБРАННЫЙ НАВЫК" : "НАВЫК НЕ ВЫБРАН. МАТЕРИАЛЫ ВСЕХ НАЗНАЧЕННЫХ НАВЫКОВ",
+        skills.map((s) => skillPromptBlock(s, skillChosen)).join("\n\n"),
+      ].join("\n")
     : "";
   const memory = memoryBlock ? `\nRelevant memory:\n${memoryBlock}` : "";
+  const noSkillTask = agent.systemPrompt?.trim();
 
-  if (agent.systemPrompt?.trim()) {
-    return [agent.systemPrompt.trim(), skillsBlock, memory, playbookBlock(agent)]
+  if (!skillChosen && noSkillTask) {
+    return [
+      "Пользователь не выбрал навык.",
+      "ЗАДАЧА АГЕНТА — выполни её. Она главнее материалов навыков ниже:",
+      noSkillTask,
+      "Материалы навыков открывай для ответа только если задача это разрешает. Если задача велит попросить выбрать навык — не отвечай по материалам, назови навыки и попроси выбрать.",
+      skillsBlock,
+      memory,
+      playbookBlock(agent),
+    ]
       .filter(Boolean)
       .join("\n");
+  }
+
+  if (skillChosen && noSkillTask) {
+    return [skillsBlock, memory, playbookBlock(agent)].filter(Boolean).join("\n");
   }
 
   return [
@@ -129,7 +164,54 @@ export class AgentEngine {
     this.llm = llm ?? createLLMProvider();
   }
 
-  async run(input: RunTaskInput): Promise<RunTaskResult> {
+  /** Streams one model turn and forwards text tokens as they arrive. */
+  private async completeTurn(
+    messages: Message[],
+    options: LLMOptions,
+    onDelta: (delta: string) => void,
+  ): Promise<LLMResponse> {
+    let content = "";
+    const toolCalls: LLMToolCall[] = [];
+    let usage: LLMResponse["usage"];
+    let model = options.model ?? "";
+
+    for await (const chunk of this.llm.stream(messages, options)) {
+      if (chunk.content) {
+        content += chunk.content;
+        onDelta(chunk.content);
+      }
+      if (chunk.toolCalls?.length) toolCalls.push(...chunk.toolCalls);
+      if (chunk.model) model = chunk.model;
+      if (chunk.usage && (chunk.usage.totalTokens || chunk.usage.inputTokens || chunk.usage.outputTokens)) {
+        usage = chunk.usage;
+      }
+    }
+
+    if (!usage) {
+      const inputTokens = Math.max(
+        1,
+        Math.ceil(messages.reduce((n, m) => n + m.content.length, 0) / 4),
+      );
+      const outputTokens = Math.ceil(
+        (content + toolCalls.map((t) => `${t.name}${t.arguments}`).join("")).length / 4,
+      );
+      usage = { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+    }
+
+    return {
+      content,
+      toolCalls: toolCalls.length ? toolCalls : undefined,
+      usage,
+      model,
+      provider: this.llm.name,
+    };
+  }
+
+  run(input: RunTaskInput): Promise<RunTaskResult> {
+    return enqueueMilli(() => this.execute(input));
+  }
+
+  private async execute(input: RunTaskInput): Promise<RunTaskResult> {
     const agent = await prisma.agent.findUnique({
       where: { id: input.agentId },
       include: {
@@ -220,14 +302,17 @@ export class AgentEngine {
       });
       const memoryBlock = formatMemoryForPrompt(memory);
 
+      const skillChosen = Boolean(input.skillIds?.length);
       const skillModel =
-        skills.length === 1 && skills[0]?.model?.trim() ? skills[0].model.trim() : "";
-      const taskTail = skills.some((s) => s.documentText?.trim() || s.systemPrompt?.trim())
-        ? "Ответь в рамках общего промпта активного навыка. Если к навыку прикреплён текст — опирайся только на него."
-        : "Дай лучший итоговый ответ. Используй инструменты, если это помогает.";
+        skillChosen && skills.length === 1 && skills[0]?.model?.trim()
+          ? skills[0].model.trim()
+          : "";
+      const taskTail = skillChosen
+        ? "Пользователь выбрал навык. Ответь строго по его промпту. Если к навыку прикреплён текст — опирайся только на него."
+        : "Навык не выбран. Выполни задачу агента из системного промпта.";
 
       const messages: Message[] = [
-        { role: "system", content: buildSystemPrompt(agent, skills, memoryBlock) },
+        { role: "system", content: buildSystemPrompt(agent, skills, memoryBlock, skillChosen) },
         {
           role: "user",
           content: `Задача:\n${input.instruction}\n\n${taskTail}`,
@@ -235,6 +320,18 @@ export class AgentEngine {
       ];
 
       let finalResult = "";
+      let streamed = "";
+      let padNext = false;
+      const onDelta = (delta: string) => {
+        if (!delta) return;
+        if (padNext) {
+          padNext = false;
+          streamed += "\n\n";
+          input.onDelta?.("\n\n");
+        }
+        streamed += delta;
+        input.onDelta?.(delta);
+      };
 
       while (iterations < limits.maxIterations) {
         if (controller.signal.aborted) {
@@ -253,13 +350,13 @@ export class AgentEngine {
         await setStatus("THINKING", `Думаю (шаг ${iterations})`);
         await emit("iteration", `Итерация ${iterations}`);
 
-        const response = await this.llm.chat(messages, {
+        const response = await this.completeTurn(messages, {
           model: skillModel || agent.model || readDefaultModel(),
           temperature: agent.temperature,
           maxTokens: limits.maxTokens,
           tools: toToolDefs(tools),
           signal: controller.signal,
-        });
+        }, onDelta);
 
         if (response.usage) {
           await prisma.usageRecord.create({
@@ -340,10 +437,11 @@ export class AgentEngine {
               content: toolResultText,
             });
           }
+          padNext = streamed.length > 0;
           continue;
         }
 
-        finalResult = response.content?.trim() || "Ответ не сформирован.";
+        finalResult = streamed.trim() || response.content?.trim() || "Ответ не сформирован.";
         await emit("final_result", "Задача завершена", {
           preview: finalResult.slice(0, 500),
         });

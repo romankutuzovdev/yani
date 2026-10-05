@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type ModelOption = {
   id: string;
@@ -22,6 +22,18 @@ type Props = {
   disabled?: boolean;
 };
 
+const CUSTOM = "__custom__";
+
+function priceLabel(model: ModelOption) {
+  if (!model.pricing) return "";
+  return `$${model.pricing.inputUsdPerM.toFixed(2)} / $${model.pricing.outputUsdPerM.toFixed(2)} за 1 млн`;
+}
+
+function optionLabel(model: ModelOption) {
+  const price = priceLabel(model);
+  return price ? `${model.displayName} · ${price}` : model.displayName;
+}
+
 export function ModelSelect({
   value,
   onChange,
@@ -35,6 +47,7 @@ export function ModelSelect({
   const [provider, setProvider] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [customOpen, setCustomOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,37 +77,61 @@ export function ModelSelect({
     };
   }, []);
 
-  const known = new Set(models.map((m) => m.id));
-  const orphan = value && !known.has(value) ? value : "";
+  const known = useMemo(() => new Set(models.map((m) => m.id)), [models]);
+  const selected = models.find((m) => m.id === value);
+  const showCustom =
+    customOpen || Boolean(error) || (Boolean(value) && models.length > 0 && !known.has(value));
+  const selectValue = showCustom ? CUSTOM : value;
+
+  const hint = loading
+    ? "Загрузка моделей…"
+    : error
+      ? error
+      : selected
+        ? `${selected.displayName}${priceLabel(selected) ? ` · ${priceLabel(selected)}` : ""}`
+        : value.trim()
+          ? `Свой id: ${value.trim()}`
+          : provider
+            ? `${models.length} моделей · ${provider}`
+            : "Выберите модель";
 
   return (
     <div>
       <select
         id={id}
         className={className}
-        value={value}
+        value={selectValue}
         disabled={disabled || loading}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (next === CUSTOM) {
+            setCustomOpen(true);
+            return;
+          }
+          setCustomOpen(false);
+          onChange(next);
+        }}
       >
         {allowEmpty ? <option value="">{emptyLabel}</option> : null}
         {!allowEmpty && !value ? <option value="">Выберите модель</option> : null}
-        {orphan ? <option value={orphan}>{orphan} (текущая)</option> : null}
         {models.map((m) => (
           <option key={m.id} value={m.id}>
-            {m.displayName}
-            {m.pricing ? ` · $${m.pricing.inputUsdPerM.toFixed(2)} / $${m.pricing.outputUsdPerM.toFixed(2)} за 1 млн` : ""}
+            {optionLabel(m)}
           </option>
         ))}
+        <option value={CUSTOM}>Вписать свой id…</option>
       </select>
-      <p className="mt-1 text-xs text-slate-500">
-        {loading
-          ? "Загрузка моделей…"
-          : error
-            ? error
-            : provider
-              ? `${models.length} моделей · ${provider}`
-              : null}
-      </p>
+      {showCustom ? (
+        <input
+          className={`${className} mt-2`}
+          value={value}
+          disabled={disabled || loading}
+          placeholder="например gpt-5.5"
+          autoComplete="off"
+          onChange={(e) => onChange(e.target.value)}
+        />
+      ) : null}
+      <p className="mt-1 text-xs text-slate-500">{hint}</p>
     </div>
   );
 }

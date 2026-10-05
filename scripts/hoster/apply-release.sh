@@ -45,12 +45,27 @@ if [ -d "$KEEP/uploads" ]; then
   cp -a "$KEEP/uploads" "$STAGE/uploads"
 fi
 
-# Remember the port the live process is actually using.
+# The site proxy on this host listens on 10020. The Node process is often
+# titled next-server, not "node server.js", so match by working directory.
 LIVE_PORT=""
-live_pid="$(ps -u "$(id -u)" -o pid=,args= | awk '/[n]ode server\.js/ {print $1; exit}')"
-if [ -n "$live_pid" ] && [ -r "/proc/${live_pid}/environ" ]; then
-  LIVE_PORT="$(tr '\0' '\n' < "/proc/${live_pid}/environ" | sed -n 's/^PORT=//p' | head -1)"
-fi
+kill_pids=""
+while read -r pid args; do
+  [ -n "$pid" ] || continue
+  cwd="$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)"
+  case "$cwd" in
+    "$APP"|"$APP/"*) ;;
+    *) continue ;;
+  esac
+  if [ -r "/proc/${pid}/environ" ]; then
+    port="$(tr '\0' '\n' < "/proc/${pid}/environ" | sed -n 's/^PORT=//p' | head -1)"
+    if [ -n "$port" ]; then
+      LIVE_PORT="$port"
+    fi
+  fi
+  kill_pids="${kill_pids} ${pid}"
+done <<EOF
+$(ps -u "$(id -u)" -o pid=,args= | awk '/next-server|[n]ode server\.js/ {print}')
+EOF
 
 rsync -a --delete \
   --exclude '.git/' \
@@ -70,10 +85,47 @@ if [ -d "$KEEP/uploads" ]; then
   cp -a "$KEEP/uploads" "$APP/uploads"
 fi
 
-if [ -n "$live_pid" ]; then
-  kill "$live_pid" 2>/dev/null || true
+if [ -n "${kill_pids# }" ]; then
+  # shellcheck disable=SC2086
+  kill $kill_pids 2>/dev/null || true
+  sleep 1
+  # shellcheck disable=SC2086
+  kill -9 $kill_pids 2>/dev/null || true
   sleep 1
 fi
+
+# CageFS hides next-server from ps, but the threads can still be signalled.
+python3 - << 'PY'
+import os
+def listening(port):
+    try:
+        lines = open("/proc/net/tcp").read().splitlines()[1:]
+    except OSError:
+        return False
+    for line in lines:
+        parts = line.split()
+        local_port = int(parts[1].rsplit(":", 1)[1], 16)
+        if local_port == port and parts[3] == "0A":
+            return True
+    return False
+if not listening(10020):
+    raise SystemExit
+me = {os.getpid(), os.getppid()}
+hidden = []
+for pid in range(1, 4200000):
+    if pid in me:
+        continue
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        continue
+    if os.path.exists(f"/proc/{pid}/cmdline"):
+        continue
+    hidden.append(pid)
+if hidden:
+    os.kill(min(hidden), 9)
+PY
+sleep 1
 
 set -a
 # shellcheck disable=SC1091
@@ -81,6 +133,10 @@ set -a
 set +a
 if [ -n "$LIVE_PORT" ]; then
   export PORT="$LIVE_PORT"
+fi
+# Nginx for yani.by proxies to 10020. .env may still say 3000.
+if [ "${PORT:-3000}" = "3000" ]; then
+  export PORT=10020
 fi
 export NODE_ENV=production
 export HOSTNAME="${HOSTNAME:-0.0.0.0}"

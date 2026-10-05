@@ -1,6 +1,6 @@
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  binaryTargets = ["native", "rhel-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -103,6 +103,13 @@ model Agent {
   maxIterations  Int           @default(10)
   maxTokens      Int           @default(4096)
   timeoutMs      Int           @default(120000)
+  /** 0 — без лимита */
+  dailyRequestLimit   Int      @default(0)
+  monthlyRequestLimit Int      @default(0)
+  requestCountDay     Int      @default(0)
+  requestCountDayKey  String   @default("")
+  requestCountMonth   Int      @default(0)
+  requestCountMonthKey String  @default("")
   status         AgentStatus   @default(IDLE)
   statusMessage  String        @default("")
   enabled        Boolean       @default(true)
@@ -294,6 +301,29 @@ model Memory {
 
   @@index([agentId, type, createdAt])
   @@index([agentId, userId])
+}
+
+model VisitorRequest {
+  id        String   @id @default(cuid())
+  ip        String
+  agentId   String   @default("")
+  agentName String   @default("")
+  sessionId String   @default("")
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([ip, createdAt])
+}
+
+model IpBlock {
+  ip           String    @id
+  reason       String    @default("")
+  /** manual — until an admin lifts it; bot — until blockedUntil */
+  source       String    @default("manual")
+  blockedUntil DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model ChatMessage {

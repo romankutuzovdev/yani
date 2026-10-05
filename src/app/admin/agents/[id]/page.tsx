@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { CharacterStage } from "@/components/CharacterStage";
 import { ModelSelect } from "@/components/ModelSelect";
 import {
@@ -49,6 +49,10 @@ type AgentDetail = {
   additionalInstructions: string;
   systemPrompt: string;
   model: string;
+  dailyRequestLimit: number;
+  monthlyRequestLimit: number;
+  requestsToday?: number;
+  requestsMonth?: number;
   temperature: number;
   maxIterations: number;
   status: string;
@@ -62,12 +66,15 @@ const STATES = ALL_CHARACTER_STATES;
 
 export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLog, setChatLog] = useState<Array<{ role: string; content: string }>>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [acting, setActing] = useState(false);
   const [previewState, setPreviewState] = useState<CharacterState | null>(null);
   const [spentLabel, setSpentLabel] = useState("");
 
@@ -152,6 +159,8 @@ export default function AgentDetailPage() {
         additionalInstructions: agent.additionalInstructions,
         systemPrompt: agent.systemPrompt,
         model: agent.model,
+        dailyRequestLimit: agent.dailyRequestLimit ?? 0,
+        monthlyRequestLimit: agent.monthlyRequestLimit ?? 0,
         temperature: agent.temperature,
         maxIterations: agent.maxIterations,
         skillAssignments: agent.skills.map((s, i) => ({
@@ -165,6 +174,34 @@ export default function AgentDetailPage() {
     setSaving(false);
     setMessage(res.ok ? "Сохранено" : "Ошибка сохранения");
     await load();
+  }
+
+  async function copyAgent() {
+    if (!agent || acting) return;
+    setActing(true);
+    setMessage("");
+    const res = await fetch(`/api/agents/${agent.id}/copy`, { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    setActing(false);
+    if (!res.ok || !data.agent?.id) {
+      setMessage(data.error ?? "Не удалось скопировать");
+      return;
+    }
+    router.push(`/admin/agents/${data.agent.id}`);
+  }
+
+  async function deleteAgent() {
+    if (!agent || acting) return;
+    setActing(true);
+    const res = await fetch(`/api/agents/${agent.id}`, { method: "DELETE" });
+    setActing(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setMessage(data.error ?? "Не удалось удалить");
+      setConfirmDelete(false);
+      return;
+    }
+    router.push("/admin/agents");
   }
 
   async function uploadLogo(file: File) {
@@ -210,13 +247,54 @@ export default function AgentDetailPage() {
           <h1 className="text-3xl font-semibold">{agent.name}</h1>
           <p className="text-slate-500">Лого, hero, приветствие, промпт и навыки</p>
         </div>
-        <button
-          onClick={save}
-          disabled={saving}
-          className="rounded-xl bg-violet-600 px-4 py-2.5 font-medium text-white hover:bg-violet-500"
-        >
-          {saving ? "Сохранение…" : "Сохранить"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {confirmDelete ? (
+            <>
+              <span className="text-sm text-slate-500">Удалить агента?</span>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                className="rounded-xl px-3 py-2.5 text-sm text-slate-600 hover:bg-violet-50"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                disabled={acting}
+                onClick={() => void deleteAgent()}
+                className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-60"
+              >
+                Удалить
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={acting}
+                onClick={() => void copyAgent()}
+                className="rounded-xl border border-violet-200 px-4 py-2.5 text-sm font-medium text-violet-800 hover:bg-violet-50 disabled:opacity-60"
+              >
+                Копировать
+              </button>
+              <button
+                type="button"
+                disabled={acting}
+                onClick={() => setConfirmDelete(true)}
+                className="rounded-xl px-3 py-2.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-60"
+              >
+                Удалить
+              </button>
+              <button
+                onClick={save}
+                disabled={saving}
+                className="rounded-xl bg-violet-600 px-4 py-2.5 font-medium text-white hover:bg-violet-500"
+              >
+                {saving ? "Сохранение…" : "Сохранить"}
+              </button>
+            </>
+          )}
+        </div>
       </div>
       {message && <p className="text-sm text-violet-600">{message}</p>}
 
@@ -268,6 +346,21 @@ export default function AgentDetailPage() {
       </section>
 
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
+        <h2 className="font-medium text-slate-900">Если навык не выбран</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Задача только для этого агента, когда в чате навык не выбран. Текст задаёте вы: искать по всем
+          назначенным навыкам или попросить выбрать навык. Когда навык выбран, действует его промпт.
+        </p>
+        <textarea
+          className="mt-3 min-h-40 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2 text-sm"
+          value={agent.systemPrompt}
+          onChange={(e) => setAgent({ ...agent, systemPrompt: e.target.value })}
+          placeholder={"Например:\nИщи ответ по всем навыкам ниже и не смешивай факты, если они из разных навыков.\n\nили:\nНе отвечай по существу. Перечисли навыки и попроси выбрать один."}
+        />
+        <p className="mt-2 text-xs text-slate-500">Сохраняется вместе с кнопкой «Сохранить» внизу страницы.</p>
+      </section>
+
+      <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="font-medium text-slate-900">Модель этого агента</h2>
         <p className="mt-1 text-sm text-slate-500">
           Только этот агент отвечает выбранной моделью. Цена в списке — вход / выход за 1 млн токенов.
@@ -278,6 +371,52 @@ export default function AgentDetailPage() {
             value={agent.model ?? ""}
             onChange={(model) => setAgent({ ...agent, model })}
           />
+        </div>
+        <p className="mt-2 text-xs text-slate-500">Сохраняется вместе с кнопкой «Сохранить» внизу страницы.</p>
+      </section>
+
+      <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
+        <h2 className="font-medium text-slate-900">Лимит запросов</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Сколько сообщений этот агент принимает из чата и виджета. Пустое поле — без лимита. День и месяц
+          считаются по минскому времени. Сейчас: сегодня {agent.requestsToday ?? 0}, в этом месяце{" "}
+          {agent.requestsMonth ?? 0}.
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="block text-sm text-slate-700">
+            В день
+            <input
+              type="number"
+              min={0}
+              inputMode="numeric"
+              className="mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
+              value={agent.dailyRequestLimit || ""}
+              placeholder="Без лимита"
+              onChange={(e) =>
+                setAgent({
+                  ...agent,
+                  dailyRequestLimit: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                })
+              }
+            />
+          </label>
+          <label className="block text-sm text-slate-700">
+            В месяц
+            <input
+              type="number"
+              min={0}
+              inputMode="numeric"
+              className="mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
+              value={agent.monthlyRequestLimit || ""}
+              placeholder="Без лимита"
+              onChange={(e) =>
+                setAgent({
+                  ...agent,
+                  monthlyRequestLimit: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                })
+              }
+            />
+          </label>
         </div>
         <p className="mt-2 text-xs text-slate-500">Сохраняется вместе с кнопкой «Сохранить» внизу страницы.</p>
       </section>

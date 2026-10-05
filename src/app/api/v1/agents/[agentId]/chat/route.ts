@@ -5,6 +5,12 @@ import { checkRateLimit, error, json, resolveApiKey, writeLog } from "@/lib/api"
 import { agentEngine } from "@/agent/AgentEngine";
 import { writeMemory } from "@/memory";
 import { asStringArray } from "@/lib/utils";
+import { purgeExpiredChatMessages } from "@/lib/chatHistory";
+import { enqueueMilli } from "@/lib/milliQueue";
+import { clientIp, guardChatIp, logVisitorRequest } from "@/lib/visitorGuard";
+import { takeAgentRequestSlot } from "@/lib/agentQuota";
+
+export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ agentId: string }> };
 
@@ -69,51 +75,112 @@ export async function POST(req: NextRequest, { params }: Params) {
         message: z.string().min(1),
         sessionId: z.string().default("widget"),
         skillId: z.string().optional().nullable(),
+        stream: z.boolean().optional(),
       })
       .parse(await req.json());
 
-    await prisma.chatMessage.create({
-      data: {
-        agentId,
-        sessionId: body.sessionId,
-        role: "user",
-        content: body.message,
-      },
-    });
-
-    await writeMemory({
+    const ip = clientIp(req);
+    const gate = await guardChatIp(ip);
+    await logVisitorRequest({
+      ip,
       agentId,
-      content: `Widget user: ${body.message}`,
-      type: "SHORT_TERM",
-    });
-
-    const result = await agentEngine.run({
-      agentId,
-      instruction: body.message,
+      agentName: agent.name,
       sessionId: body.sessionId,
-      skillIds: body.skillId ? [body.skillId] : undefined,
-      limits: { maxIterations: Math.min(agent.maxIterations, 6) },
-    });
+      message: body.message,
+    }).catch(() => undefined);
+    if (!gate.ok) {
+      const denied = error(gate.message, 403);
+      Object.entries(corsHeaders(origin)).forEach(([k, v]) => denied.headers.set(k, v));
+      return denied;
+    }
 
-    await prisma.chatMessage.create({
-      data: {
-        agentId,
-        sessionId: body.sessionId,
-        role: "assistant",
-        content: result.result || result.error || "",
-      },
-    });
+    const slot = await enqueueMilli(() => takeAgentRequestSlot(agentId));
+    if (!slot.ok) {
+      const denied = error(slot.message, 429);
+      Object.entries(corsHeaders(origin)).forEach(([k, v]) => denied.headers.set(k, v));
+      return denied;
+    }
 
-    await writeLog({
-      type: "api_chat",
-      message: `Public chat with ${agent.name}`,
-      agentId,
-      meta: { success: result.success },
-    });
+    void enqueueMilli(() => purgeExpiredChatMessages()).catch(() => undefined);
+
+    const runTurn = (onDelta?: (delta: string) => void) =>
+      enqueueMilli(async () => {
+        await prisma.chatMessage.create({
+          data: {
+            agentId,
+            sessionId: body.sessionId,
+            role: "user",
+            content: body.message,
+          },
+        });
+
+        await writeMemory({
+          agentId,
+          content: `Widget user: ${body.message}`,
+          type: "SHORT_TERM",
+        });
+
+        const result = await agentEngine.run({
+          agentId,
+          instruction: body.message,
+          sessionId: body.sessionId,
+          skillIds: body.skillId ? [body.skillId] : undefined,
+          limits: { maxIterations: Math.min(agent.maxIterations, 6) },
+          onDelta,
+        });
+        const reply = result.result || result.error || "";
+        await prisma.chatMessage.create({
+          data: {
+            agentId,
+            sessionId: body.sessionId,
+            role: "assistant",
+            content: reply,
+          },
+        });
+        await writeLog({
+          type: "api_chat",
+          message: `Public chat with ${agent.name}`,
+          agentId,
+          meta: { success: result.success, stream: Boolean(onDelta) },
+        });
+        return { result, reply };
+      });
+
+    if (body.stream) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          const send = (payload: unknown) => {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+          };
+          send({ status: "start" });
+          try {
+            const { result, reply } = await runTurn((delta) => send({ delta }));
+            send({ done: true, reply, success: result.success });
+          } catch (err) {
+            send({ error: err instanceof Error ? err.message : "Chat failed" });
+          } finally {
+            controller.close();
+          }
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          ...corsHeaders(origin),
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
+
+    const { result, reply } = await runTurn();
 
     return json(
       {
-        reply: result.result || result.error,
+        reply,
         success: result.success,
         status: agent.status,
       },

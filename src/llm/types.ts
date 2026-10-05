@@ -46,8 +46,15 @@ export interface LLMResponse {
 
 export interface LLMChunk {
   content?: string;
-  toolCalls?: Partial<LLMToolCall>[];
+  toolCalls?: LLMToolCall[];
   done?: boolean;
+  model?: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    cachedInputTokens?: number;
+  };
 }
 
 export type LLMModelKind = "chat" | "image" | "all";

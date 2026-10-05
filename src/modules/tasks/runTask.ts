@@ -2,8 +2,13 @@ import { prisma } from "@/lib/db";
 import { agentEngine } from "@/agent/AgentEngine";
 import { writeLog } from "@/lib/api";
 import { asStringArray } from "@/lib/utils";
+import { enqueueMilli } from "@/lib/milliQueue";
 
-export async function runTask(taskId: string) {
+export function runTask(taskId: string) {
+  return enqueueMilli(() => runTaskQueued(taskId));
+}
+
+async function runTaskQueued(taskId: string) {
   const task = await prisma.task.findUnique({ where: { id: taskId } });
   if (!task) return;
 

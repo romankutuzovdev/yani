@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { HeroBubble } from "@/components/HeroBubble";
 import type { CharacterAssetView } from "@/characters/CharacterRenderer";
-import { ArrowUp, History, Menu, MessageSquarePlus, Sparkles, X } from "lucide-react";
+import { ArrowUp, History, Menu, MessageSquarePlus, Sparkles, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type SkillTile = {
@@ -41,20 +41,28 @@ type ChatSession = {
 };
 
 const HISTORY_KEY = "yani-chat-history-v1";
+const HISTORY_MS = 7 * 24 * 60 * 60 * 1000;
+
+function freshSessions(sessions: ChatSession[]) {
+  const cutoff = Date.now() - HISTORY_MS;
+  return sessions.filter((s) => s.updatedAt >= cutoff).slice(0, 30);
+}
 
 function loadHistory(): ChatSession[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as ChatSession[];
+    const sessions = freshSessions(JSON.parse(raw) as ChatSession[]);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(sessions));
+    return sessions;
   } catch {
     return [];
   }
 }
 
 function saveHistory(sessions: ChatSession[]) {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(sessions.slice(0, 30)));
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(freshSessions(sessions)));
 }
 
 export default function ClientChatPage() {
@@ -68,6 +76,7 @@ export default function ClientChatPage() {
   );
   const [activeSkillId, setActiveSkillId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -194,6 +203,22 @@ export default function ClientChatPage() {
     setHistoryOpen(false);
   }
 
+  async function clearHistory() {
+    if (!sessions.length) return;
+    const ids = sessions.map((s) => s.id);
+    setConfirmClear(false);
+    setSessions([]);
+    localStorage.removeItem(HISTORY_KEY);
+    if (agent) {
+      void fetch(`/api/v1/agents/${agent.id}/history`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionIds: ids }),
+      });
+    }
+    startNewChat();
+  }
+
   async function send(e?: FormEvent) {
     e?.preventDefault();
     if (!agent || !input.trim() || busy) return;
@@ -202,7 +227,7 @@ export default function ClientChatPage() {
     setBusy(true);
     setError("");
     const withUser = [...messages, { role: "user" as const, content: text }];
-    setMessages(withUser);
+    setMessages([...withUser, { role: "assistant", content: "" }]);
 
     try {
       const res = await fetch(`/api/v1/agents/${agent.id}/chat`, {
@@ -212,21 +237,59 @@ export default function ClientChatPage() {
           message: text,
           sessionId,
           skillId: activeSkillId,
+          stream: true,
         }),
       });
-      const data = await res.json();
-      let next: ChatMsg[];
-      if (!res.ok) {
-        next = [
+      const ctype = res.headers.get("content-type") ?? "";
+      if (!ctype.includes("text/event-stream") || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        const next: ChatMsg[] = [
           ...withUser,
-          { role: "assistant", content: data.error ?? "Не удалось получить ответ" },
+          {
+            role: "assistant",
+            content: data.reply ?? data.error ?? "Не удалось получить ответ",
+          },
         ];
-      } else {
-        next = [
-          ...withUser,
-          { role: "assistant", content: data.reply ?? "Пустой ответ" },
-        ];
+        setMessages(next);
+        persistSession(next);
+        return;
       }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let acc = "";
+      let failed = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split(/\n\n/);
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part
+            .split("\n")
+            .map((l) => l.trim())
+            .find((l) => l.startsWith("data:"));
+          if (!line) continue;
+          let data: { delta?: string; reply?: string; error?: string; done?: boolean };
+          try {
+            data = JSON.parse(line.slice(5).trim());
+          } catch {
+            continue;
+          }
+          if (data.delta) {
+            acc += data.delta;
+            setMessages([...withUser, { role: "assistant", content: acc }]);
+          }
+          if (data.error) failed = data.error;
+          if (data.done && data.reply) acc = data.reply;
+        }
+      }
+      const next: ChatMsg[] = [
+        ...withUser,
+        { role: "assistant", content: acc.trim() || failed || "Пустой ответ" },
+      ];
       setMessages(next);
       persistSession(next);
     } catch {
@@ -408,24 +471,28 @@ export default function ClientChatPage() {
         ) : (
           <section className="flex flex-col pb-2">
             <div className="space-y-3 sm:space-y-4">
-              {messages.map((m, i) => (
-                <div
-                  key={i}
-                  className={cn(
-                    "max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed sm:max-w-[92%] sm:px-4 sm:py-3",
-                    m.role === "user"
-                      ? "ml-auto bg-yani-deep text-white"
-                      : "bg-yani-soft/70 text-slate-800",
-                  )}
-                >
-                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
-                </div>
-              ))}
-              {busy && (
-                <div className="w-fit rounded-2xl bg-yani-soft/70 px-4 py-3 text-sm text-slate-500">
-                  Думаю…
-                </div>
-              )}
+              {messages.map((m, i) => {
+                const typing = busy && i === messages.length - 1 && m.role === "assistant";
+                const text = m.content || (typing ? "Думаю…" : "");
+                return (
+                  <div
+                    key={i}
+                    className={cn(
+                      "max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed sm:max-w-[92%] sm:px-4 sm:py-3",
+                      m.role === "user"
+                        ? "ml-auto bg-yani-deep text-white"
+                        : "bg-yani-soft/70 text-slate-800",
+                    )}
+                  >
+                    <div className="whitespace-pre-wrap break-words">
+                      {text}
+                      {typing && m.content ? (
+                        <span className="ml-0.5 inline-block animate-pulse text-yani-deep">▍</span>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
               <div ref={chatEndRef} />
             </div>
           </section>
@@ -492,7 +559,10 @@ export default function ClientChatPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex h-14 items-center justify-between border-b border-slate-100 px-4">
-              <h2 className="font-medium">История чатов</h2>
+              <div>
+                <h2 className="font-medium">История чатов</h2>
+                <p className="text-xs text-slate-400">Хранится 7 дней</p>
+              </div>
               <button
                 type="button"
                 onClick={() => setHistoryOpen(false)}
@@ -530,6 +600,37 @@ export default function ClientChatPage() {
                 <p className="px-2 py-6 text-center text-sm text-slate-400">Пока пусто</p>
               )}
             </div>
+            {sessions.length > 0 && (
+              <div className="border-t border-slate-100 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+                {confirmClear ? (
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClear(false)}
+                      className="flex-1 rounded-xl px-3 py-3 text-sm text-slate-600 active:bg-slate-50"
+                    >
+                      Отмена
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void clearHistory()}
+                      className="flex-1 rounded-xl bg-red-600 px-3 py-3 text-sm text-white active:bg-red-700"
+                    >
+                      Очистить
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClear(true)}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm text-red-600 active:bg-red-50"
+                  >
+                    <Trash2 size={16} />
+                    Очистить историю
+                  </button>
+                )}
+              </div>
+            )}
           </aside>
         </div>
       )}
@@ -572,12 +673,6 @@ export default function ClientChatPage() {
               >
                 <History size={16} /> История чатов
               </button>
-              <Link
-                href="/login"
-                className="flex w-full items-center gap-2 rounded-xl px-3 py-3.5 active:bg-slate-50"
-              >
-                Админка
-              </Link>
             </nav>
           </aside>
         </div>

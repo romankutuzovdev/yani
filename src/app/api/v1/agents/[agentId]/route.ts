@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { checkRateLimit, error, json, resolveApiKey } from "@/lib/api";
+import { withDefaultHeroAssets } from "@/characters/defaults";
 
 type Params = { params: Promise<{ agentId: string }> };
 
@@ -42,9 +43,18 @@ export async function GET(req: NextRequest, { params }: Params) {
         id: agent.id,
         name: agent.name,
         description: agent.description,
+        logoUrl: agent.logoUrl || "/brand/yani-logo.png",
         status: agent.status,
         statusMessage: agent.statusMessage,
-        character: agent.character,
+        character: agent.character
+          ? { ...agent.character, assets: withDefaultHeroAssets(agent.character.assets) }
+          : {
+              id: "default",
+              name: agent.name,
+              description: "",
+              defaultState: "IDLE",
+              assets: withDefaultHeroAssets(null),
+            },
         widget: agent.widgets[0] ?? null,
       },
     },

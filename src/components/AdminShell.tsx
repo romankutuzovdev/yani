@@ -3,13 +3,15 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bot, KeyRound, LayoutDashboard, Settings, Sparkles } from "lucide-react";
+import { BarChart3, Bot, KeyRound, LayoutDashboard, Settings, Shield, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/admin", label: "Обзор", icon: LayoutDashboard },
   { href: "/admin/agents", label: "Агенты", icon: Bot },
   { href: "/admin/skills", label: "Навыки", icon: Sparkles },
+  { href: "/admin/analytics", label: "Аналитика", icon: BarChart3 },
+  { href: "/admin/visitors", label: "Запросы", icon: Shield },
   { href: "/admin/api-keys", label: "API-ключи", icon: KeyRound },
   { href: "/admin/settings", label: "Настройки", icon: Settings },
 ];

@@ -84,6 +84,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       max_tokens: options?.maxTokens ?? 4096,
       stream,
     };
+    if (stream) body.stream_options = { include_usage: true };
     if (options?.tools?.length) {
       body.tools = options.tools;
       body.tool_choice = "auto";
@@ -217,18 +218,31 @@ export class OpenAICompatibleProvider implements LLMProvider {
     };
   }
 
-  async *stream(messages: Message[], options?: LLMOptions): AsyncIterable<LLMChunk> {
-    this.ensureKey();
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+  private async postChat(messages: Message[], options: LLMOptions | undefined, stream: boolean, includeUsage: boolean) {
+    const body = this.buildBody(messages, options, stream);
+    if (!includeUsage) delete body.stream_options;
+    return fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(this.buildBody(messages, options, true)),
+      body: JSON.stringify(body),
       signal: options?.signal,
     });
+  }
 
+  async *stream(messages: Message[], options?: LLMOptions): AsyncIterable<LLMChunk> {
+    this.ensureKey();
+    let res = await this.postChat(messages, options, true, true);
+    if (!res.ok) {
+      const text = await res.text();
+      if (res.status === 400 && /stream_options|include_usage/i.test(text)) {
+        res = await this.postChat(messages, options, true, false);
+      } else {
+        throw new Error(`${this.name} stream error ${res.status}: ${text}`);
+      }
+    }
     if (!res.ok || !res.body) {
       const text = await res.text();
       throw new Error(`${this.name} stream error ${res.status}: ${text}`);
@@ -237,6 +251,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    const toolAcc = new Map<number, { id: string; name: string; arguments: string }>();
+    let usage: LLMChunk["usage"];
+    let model = "";
 
     while (true) {
       const { done, value } = await reader.read();
@@ -250,20 +267,55 @@ export class OpenAICompatibleProvider implements LLMProvider {
         if (!trimmed.startsWith("data:")) continue;
         const payload = trimmed.slice(5).trim();
         if (payload === "[DONE]") {
-          yield { done: true };
+          if (toolAcc.size) {
+            yield {
+              toolCalls: Array.from(toolAcc.entries())
+                .sort((a, b) => a[0] - b[0])
+                .map(([, call]) => call)
+                .filter((call) => call.name),
+            };
+          }
+          yield { done: true, usage, model: model || undefined };
           return;
         }
         try {
-          const json = JSON.parse(payload) as ChatResponse;
+          const json = JSON.parse(payload) as ChatResponse & {
+            usage?: ChatResponse["usage"] & {
+              prompt_tokens_details?: { cached_tokens?: number };
+            };
+          };
+          if (json.model) model = json.model;
+          if (json.usage) {
+            usage = {
+              inputTokens: json.usage.prompt_tokens ?? 0,
+              outputTokens: json.usage.completion_tokens ?? 0,
+              totalTokens: json.usage.total_tokens ?? 0,
+              cachedInputTokens: json.usage.prompt_tokens_details?.cached_tokens ?? 0,
+            };
+          }
           const delta = json.choices?.[0]?.delta;
-          if (delta?.content) {
-            yield { content: delta.content };
+          if (delta?.content) yield { content: delta.content };
+          for (const call of delta?.tool_calls ?? []) {
+            const index = call.index ?? 0;
+            const current = toolAcc.get(index) ?? { id: "", name: "", arguments: "" };
+            if (call.id) current.id = call.id;
+            if (call.function?.name) current.name += call.function.name;
+            if (call.function?.arguments) current.arguments += call.function.arguments;
+            toolAcc.set(index, current);
           }
         } catch {
           // ignore malformed SSE chunks
         }
       }
     }
-    yield { done: true };
+    if (toolAcc.size) {
+      yield {
+        toolCalls: Array.from(toolAcc.entries())
+          .sort((a, b) => a[0] - b[0])
+          .map(([, call]) => call)
+          .filter((call) => call.name),
+      };
+    }
+    yield { done: true, usage, model: model || undefined };
   }
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Agent = {
   id: string;
@@ -25,10 +26,14 @@ const STATUS_RU: Record<string, string> = {
 };
 
 export default function AgentsPage() {
+  const router = useRouter();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [spent, setSpent] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState("");
+  const [confirmId, setConfirmId] = useState("");
+  const [notice, setNotice] = useState("");
 
   async function load() {
     const res = await fetch("/api/agents");
@@ -47,6 +52,33 @@ export default function AgentsPage() {
       })
       .catch(() => setSpent({}));
   }, []);
+
+  async function copyAgent(id: string) {
+    setBusyId(id);
+    setNotice("");
+    const res = await fetch(`/api/agents/${id}/copy`, { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    setBusyId("");
+    if (!res.ok || !data.agent?.id) {
+      setNotice(data.error ?? "Не удалось скопировать");
+      return;
+    }
+    router.push(`/admin/agents/${data.agent.id}`);
+  }
+
+  async function deleteAgent(id: string) {
+    setBusyId(id);
+    setNotice("");
+    const res = await fetch(`/api/agents/${id}`, { method: "DELETE" });
+    setBusyId("");
+    setConfirmId("");
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setNotice(data.error ?? "Не удалось удалить");
+      return;
+    }
+    await load();
+  }
 
   async function createAgent() {
     if (!name.trim()) return;
@@ -85,13 +117,15 @@ export default function AgentsPage() {
         </div>
       </div>
 
+      {notice && <p className="text-sm text-red-600">{notice}</p>}
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {agents.map((agent) => (
-          <Link
+          <article
             key={agent.id}
-            href={`/admin/agents/${agent.id}`}
-            className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm transition hover:border-violet-200"
+            className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm"
           >
+            <Link href={`/admin/agents/${agent.id}`} className="block transition hover:opacity-90">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 {agent.logoUrl ? (
@@ -121,7 +155,50 @@ export default function AgentsPage() {
               <span>{agent._count.tasks} задач</span>
               <span>{agent._count.memories} память</span>
             </div>
-          </Link>
+            </Link>
+            <div className="mt-4 flex items-center gap-3 border-t border-violet-50 pt-3 text-sm">
+              {confirmId === agent.id ? (
+                <>
+                  <span className="text-slate-500">Удалить агента?</span>
+                  <button
+                    type="button"
+                    disabled={busyId === agent.id}
+                    onClick={() => setConfirmId("")}
+                    className="text-slate-500 hover:text-slate-800"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyId === agent.id}
+                    onClick={() => void deleteAgent(agent.id)}
+                    className="font-medium text-red-600 hover:underline"
+                  >
+                    Удалить
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    disabled={busyId === agent.id}
+                    onClick={() => void copyAgent(agent.id)}
+                    className="text-violet-700 hover:underline disabled:opacity-50"
+                  >
+                    Копировать
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyId === agent.id}
+                    onClick={() => setConfirmId(agent.id)}
+                    className="text-red-600 hover:underline disabled:opacity-50"
+                  >
+                    Удалить
+                  </button>
+                </>
+              )}
+            </div>
+          </article>
         ))}
       </div>
     </div>

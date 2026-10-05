@@ -5,6 +5,8 @@ import { checkRateLimit, error, json, writeLog } from "@/lib/api";
 import { getSession } from "@/lib/auth";
 import { agentEngine } from "@/agent/AgentEngine";
 import { writeMemory } from "@/memory";
+import { purgeExpiredChatMessages } from "@/lib/chatHistory";
+import { enqueueMilli } from "@/lib/milliQueue";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -28,49 +30,53 @@ export async function POST(req: NextRequest, { params }: Params) {
   try {
     const body = chatSchema.parse(await req.json());
 
-    await prisma.chatMessage.create({
-      data: {
+    const result = await enqueueMilli(async () => {
+      await purgeExpiredChatMessages();
+      await prisma.chatMessage.create({
+        data: {
+          agentId: id,
+          sessionId: body.sessionId,
+          role: "user",
+          content: body.message,
+        },
+      });
+
+      await writeMemory({
         agentId: id,
-        sessionId: body.sessionId,
-        role: "user",
-        content: body.message,
-      },
-    });
+        content: `User: ${body.message}`,
+        type: "SHORT_TERM",
+        userId: session.id,
+      });
 
-    await writeMemory({
-      agentId: id,
-      content: `User: ${body.message}`,
-      type: "SHORT_TERM",
-      userId: session.id,
-    });
-
-    const result = await agentEngine.run({
-      agentId: id,
-      instruction: body.message,
-      userId: session.id,
-      sessionId: body.sessionId,
-      limits: {
-        maxIterations: Math.min(agent.maxIterations, 6),
-        timeoutMs: agent.timeoutMs,
-      },
-    });
-
-    await prisma.chatMessage.create({
-      data: {
+      const run = await agentEngine.run({
         agentId: id,
+        instruction: body.message,
+        userId: session.id,
         sessionId: body.sessionId,
-        role: "assistant",
-        content: result.result || result.error || "No response",
-        metadata: JSON.stringify({ success: result.success, iterations: result.iterations }),
-      },
-    });
+        limits: {
+          maxIterations: Math.min(agent.maxIterations, 6),
+          timeoutMs: agent.timeoutMs,
+        },
+      });
 
-    await writeLog({
-      type: "chat",
-      message: `Chat with ${agent.name}`,
-      agentId: id,
-      userId: session.id,
-      meta: { success: result.success, iterations: result.iterations },
+      await prisma.chatMessage.create({
+        data: {
+          agentId: id,
+          sessionId: body.sessionId,
+          role: "assistant",
+          content: run.result || run.error || "No response",
+          metadata: JSON.stringify({ success: run.success, iterations: run.iterations }),
+        },
+      });
+
+      await writeLog({
+        type: "chat",
+        message: `Chat with ${agent.name}`,
+        agentId: id,
+        userId: session.id,
+        meta: { success: run.success, iterations: run.iterations },
+      });
+      return run;
     });
 
     return json({
