@@ -7,8 +7,10 @@ import { writeMemory } from "@/memory";
 import { asStringArray } from "@/lib/utils";
 import { purgeExpiredChatMessages } from "@/lib/chatHistory";
 import { enqueueMilli } from "@/lib/milliQueue";
+import { ChatBusyError } from "@/lib/chatPool";
 import { clientIp, guardChatIp, logVisitorRequest } from "@/lib/visitorGuard";
 import { takeAgentRequestSlot } from "@/lib/agentQuota";
+import { CHAT_UNAVAILABLE, toChatUserMessage } from "@/lib/chatUserError";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +37,7 @@ async function authAgent(req: NextRequest, agentId: string) {
   // Prefer API key when provided.
   if (!authHeader) {
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anon";
-    const rl = checkRateLimit(`anon-chat:${ip}:${agentId}`, 20);
+    const rl = checkRateLimit(`anon-chat:${ip}:${agentId}`, 120);
     if (!rl.allowed) return { error: error("Rate limit exceeded", 429) };
     return { key: null };
   }
@@ -80,7 +82,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       .parse(await req.json());
 
     const ip = clientIp(req);
-    const gate = await guardChatIp(ip);
+    const gate = await guardChatIp(ip, agentId);
     await logVisitorRequest({
       ip,
       agentId,
@@ -103,48 +105,57 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     void enqueueMilli(() => purgeExpiredChatMessages()).catch(() => undefined);
 
-    const runTurn = (onDelta?: (delta: string) => void) =>
-      enqueueMilli(async () => {
-        await prisma.chatMessage.create({
-          data: {
-            agentId,
-            sessionId: body.sessionId,
-            role: "user",
-            content: body.message,
-          },
-        });
-
-        await writeMemory({
+    const runTurn = async (onDelta?: (delta: string) => void) => {
+      await prisma.chatMessage.create({
+        data: {
           agentId,
-          content: `Widget user: ${body.message}`,
-          type: "SHORT_TERM",
-        });
-
-        const result = await agentEngine.run({
-          agentId,
-          instruction: body.message,
           sessionId: body.sessionId,
-          skillIds: body.skillId ? [body.skillId] : undefined,
-          limits: { maxIterations: Math.min(agent.maxIterations, 6) },
-          onDelta,
-        });
-        const reply = result.result || result.error || "";
-        await prisma.chatMessage.create({
-          data: {
-            agentId,
-            sessionId: body.sessionId,
-            role: "assistant",
-            content: reply,
-          },
-        });
-        await writeLog({
-          type: "api_chat",
-          message: `Public chat with ${agent.name}`,
-          agentId,
-          meta: { success: result.success, stream: Boolean(onDelta) },
-        });
-        return { result, reply };
+          role: "user",
+          content: body.message,
+        },
       });
+
+      await writeMemory({
+        agentId,
+        content: `Widget user: ${body.message}`,
+        type: "SHORT_TERM",
+      });
+
+      const result = await agentEngine.run({
+        agentId,
+        instruction: body.message,
+        sessionId: body.sessionId,
+        skillIds: body.skillId ? [body.skillId] : undefined,
+        limits: { maxIterations: Math.min(agent.maxIterations, 6) },
+        onDelta,
+      });
+      const reply = result.success
+        ? result.result || CHAT_UNAVAILABLE
+        : result.result?.trim() || toChatUserMessage(result.error);
+      await prisma.chatMessage.create({
+        data: {
+          agentId,
+          sessionId: body.sessionId,
+          role: "assistant",
+          content: reply,
+        },
+      });
+      await writeLog({
+        level: result.success ? "INFO" : "ERROR",
+        type: result.success ? "api_chat" : "chat_error",
+        message: result.success
+          ? `Public chat with ${agent.name}`
+          : (result.detail || result.error || "Chat failed").slice(0, 4000),
+        agentId,
+        meta: {
+          success: result.success,
+          stream: Boolean(onDelta),
+          sessionId: body.sessionId,
+          message: body.message.slice(0, 200),
+        },
+      });
+      return { result, reply };
+    };
 
     if (body.stream) {
       const encoder = new TextEncoder();
@@ -158,7 +169,20 @@ export async function POST(req: NextRequest, { params }: Params) {
             const { result, reply } = await runTurn((delta) => send({ delta }));
             send({ done: true, reply, success: result.success });
           } catch (err) {
-            send({ error: err instanceof Error ? err.message : "Chat failed" });
+            const raw = err instanceof Error ? err.message : "Chat failed";
+            console.error(`[chat] public ${agent.id}: ${raw}`);
+            await writeLog({
+              level: "ERROR",
+              type: "chat_error",
+              message: raw.slice(0, 4000),
+              agentId,
+              meta: { stream: true, sessionId: body.sessionId },
+            });
+            if (err instanceof ChatBusyError) {
+              send({ error: err.message });
+            } else {
+              send({ error: toChatUserMessage(raw) });
+            }
           } finally {
             controller.close();
           }
@@ -176,18 +200,37 @@ export async function POST(req: NextRequest, { params }: Params) {
       });
     }
 
-    const { result, reply } = await runTurn();
-
-    return json(
-      {
-        reply,
-        success: result.success,
-        status: agent.status,
-      },
-      { headers: corsHeaders(origin) },
-    );
+    try {
+      const { result, reply } = await runTurn();
+      return json(
+        {
+          reply,
+          success: result.success,
+          status: agent.status,
+        },
+        { headers: corsHeaders(origin) },
+      );
+    } catch (err) {
+      if (err instanceof ChatBusyError) {
+        const denied = error(err.message, 429, { code: "busy" });
+        Object.entries(corsHeaders(origin)).forEach(([k, v]) => denied.headers.set(k, v));
+        return denied;
+      }
+      throw err;
+    }
   } catch (e) {
     if (e instanceof z.ZodError) return error(e.issues[0]?.message ?? "Invalid input");
-    return error(e instanceof Error ? e.message : "Chat failed", 500);
+    if (e instanceof ChatBusyError) {
+      return error(e.message, 429, { code: "busy" });
+    }
+    const raw = e instanceof Error ? e.message : "Chat failed";
+    console.error(`[chat] public ${agentId}: ${raw}`);
+    await writeLog({
+      level: "ERROR",
+      type: "chat_error",
+      message: raw.slice(0, 4000),
+      agentId,
+    });
+    return error(toChatUserMessage(raw), 500);
   }
 }

@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { formatExact } from "@/lib/money";
+import { PagedRows } from "@/components/PagedRows";
 
 type Range = "today" | "month" | "all";
+type Bucket = "day" | "week" | "month" | "quarter" | "year";
 
 type Report = {
   totals: {
@@ -49,6 +52,18 @@ type Report = {
     totalTokens: number;
     costLabel: string;
   }>;
+  bucket?: string;
+  series: Array<{
+    key: string;
+    label: string;
+    agentId: string;
+    agentName: string;
+    requests: number;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    costLabel: string;
+  }>;
   daily: Array<{
     date: string;
     requests: number;
@@ -77,6 +92,14 @@ const RANGES: Array<{ id: Range; label: string }> = [
   { id: "all", label: "Всё время" },
 ];
 
+const BUCKETS: Array<{ id: Bucket; label: string }> = [
+  { id: "day", label: "Дни" },
+  { id: "week", label: "Недели" },
+  { id: "month", label: "Месяцы" },
+  { id: "quarter", label: "Кварталы" },
+  { id: "year", label: "Годы" },
+];
+
 function tokens(value: number) {
   return value.toLocaleString("ru-RU");
 }
@@ -99,6 +122,8 @@ function dayLabel(date: string) {
 
 export default function AnalyticsPage() {
   const [range, setRange] = useState<Range>("month");
+  const [bucket, setBucket] = useState<Bucket>("day");
+  const [agentId, setAgentId] = useState("");
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -107,7 +132,9 @@ export default function AnalyticsPage() {
     let cancelled = false;
     setLoading(true);
     setError("");
-    void fetch(`/api/llm/usage?range=${range}`)
+    const params = new URLSearchParams({ range, bucket });
+    if (agentId) params.set("agentId", agentId);
+    void fetch(`/api/llm/usage?${params}`)
       .then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Не удалось собрать отчёт");
@@ -122,7 +149,7 @@ export default function AnalyticsPage() {
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [range, bucket, agentId]);
 
   const totals = report?.totals;
   const spent =
@@ -138,10 +165,11 @@ export default function AnalyticsPage() {
         <div>
           <h1 className="text-3xl font-semibold text-slate-900">Аналитика</h1>
           <p className="mt-1 max-w-2xl text-slate-500">
-            Сколько токенов ушло на каждого агента и модель, и сколько это стоило. Сумма считается по
-            текущим ценам vibecode: вход и выход за 1 млн токенов.
+            Сколько токенов ушло на каждого агента и модель. Сумма — сохранённая стоимость каждого
+            запроса, по минскому времени.
           </p>
         </div>
+        <div className="flex flex-col items-end gap-2">
         <div className="flex rounded-xl border border-violet-200 bg-white p-1">
           {RANGES.map((item) => (
             <button
@@ -157,6 +185,37 @@ export default function AnalyticsPage() {
               {item.label}
             </button>
           ))}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex rounded-xl border border-violet-200 bg-white p-1">
+            {BUCKETS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setBucket(item.id)}
+                className={
+                  bucket === item.id
+                    ? "rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white"
+                    : "rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-violet-50"
+                }
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <select
+            value={agentId}
+            onChange={(e) => setAgentId(e.target.value)}
+            className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-slate-700"
+          >
+            <option value="">Все агенты</option>
+            {(report?.byAgent ?? []).map((agent) => (
+              <option key={agent.agentId} value={agent.agentId}>
+                {agent.name}
+              </option>
+            ))}
+          </select>
+        </div>
         </div>
       </div>
 
@@ -174,6 +233,46 @@ export default function AnalyticsPage() {
             <p className="mt-2 text-2xl font-semibold text-slate-900">{loading && !report ? "…" : value}</p>
           </div>
         ))}
+      </section>
+
+      <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
+        <h2 className="font-medium text-slate-900">По периодам и агентам</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Разбивка по минскому времени. Сумма — как записана в каждом запросе, без пересчёта.
+        </p>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[640px] text-left text-sm">
+            <thead className="text-xs uppercase text-slate-500">
+              <tr>
+                <th className="py-2 pr-3">Период</th>
+                <th className="py-2 pr-3">Агент</th>
+                <th className="py-2 pr-3">Запросы</th>
+                <th className="py-2 pr-3">Вход</th>
+                <th className="py-2 pr-3">Выход</th>
+                <th className="py-2">Сумма</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(report?.series ?? []).map((row) => (
+                <tr key={`${row.key}-${row.agentId}`} className="border-t border-violet-50">
+                  <td className="py-2 pr-3">{row.label}</td>
+                  <td className="py-2 pr-3 font-medium text-slate-800">{row.agentName}</td>
+                  <td className="py-2 pr-3">{row.requests}</td>
+                  <td className="py-2 pr-3">{tokens(row.inputTokens)}</td>
+                  <td className="py-2 pr-3">{tokens(row.outputTokens)}</td>
+                  <td className="py-2 font-medium">{row.costLabel}</td>
+                </tr>
+              ))}
+              {!report?.series?.length && (
+                <tr>
+                  <td colSpan={6} className="py-4 text-slate-500">
+                    За выбранный период запросов не было.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
@@ -199,6 +298,12 @@ export default function AnalyticsPage() {
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="mb-1 font-medium text-slate-900">По агентам</h2>
         <p className="mb-4 text-sm text-slate-500">Кто сколько токенов потратил за выбранный период.</p>
+        <PagedRows
+          items={report?.byAgent ?? []}
+          text={(row) => `${row.name} ${row.currentModel}`}
+          placeholder="Поиск по агентам"
+        >
+          {(rows) => (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="text-xs uppercase text-slate-500">
@@ -214,7 +319,7 @@ export default function AnalyticsPage() {
               </tr>
             </thead>
             <tbody>
-              {(report?.byAgent ?? []).map((row) => (
+              {rows.map((row) => (
                 <tr key={row.agentId} className="border-t border-violet-50">
                   <td className="py-2 pr-3 font-medium text-slate-800">
                     <Link href={`/admin/agents/${row.agentId}`} className="hover:text-violet-700">
@@ -232,7 +337,7 @@ export default function AnalyticsPage() {
                   <td className="py-2 font-medium">{row.costLabel}</td>
                 </tr>
               ))}
-              {!report?.byAgent.length && (
+              {!rows.length && (
                 <tr>
                   <td colSpan={8} className="py-4 text-slate-500">
                     Агентов пока нет.
@@ -242,10 +347,18 @@ export default function AnalyticsPage() {
             </tbody>
           </table>
         </div>
+          )}
+        </PagedRows>
       </section>
 
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="mb-4 font-medium text-slate-900">Агент и модель</h2>
+        <PagedRows
+          items={report?.byAgentModel ?? []}
+          text={(row) => `${row.agentName} ${row.displayName} ${row.model}`}
+          placeholder="Поиск по агенту или модели"
+        >
+          {(rows) => (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left text-sm">
             <thead className="text-xs uppercase text-slate-500">
@@ -260,7 +373,7 @@ export default function AnalyticsPage() {
               </tr>
             </thead>
             <tbody>
-              {(report?.byAgentModel ?? []).map((row) => (
+              {rows.map((row) => (
                 <tr key={`${row.agentId}-${row.model}`} className="border-t border-violet-50">
                   <td className="py-2 pr-3">{row.agentName}</td>
                   <td className="py-2 pr-3">
@@ -274,7 +387,7 @@ export default function AnalyticsPage() {
                   <td className="py-2 font-medium">{row.costLabel}</td>
                 </tr>
               ))}
-              {!report?.byAgentModel.length && (
+              {!rows.length && (
                 <tr>
                   <td colSpan={7} className="py-4 text-slate-500">
                     За выбранный период запросов не было.
@@ -284,10 +397,18 @@ export default function AnalyticsPage() {
             </tbody>
           </table>
         </div>
+          )}
+        </PagedRows>
       </section>
 
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="mb-4 font-medium text-slate-900">По моделям</h2>
+        <PagedRows
+          items={report?.byModel ?? []}
+          text={(row) => `${row.displayName} ${row.model}`}
+          placeholder="Поиск по модели"
+        >
+          {(rows) => (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="text-xs uppercase text-slate-500">
@@ -301,7 +422,7 @@ export default function AnalyticsPage() {
               </tr>
             </thead>
             <tbody>
-              {(report?.byModel ?? []).map((row) => (
+              {rows.map((row) => (
                 <tr key={row.model} className="border-t border-violet-50">
                   <td className="py-2 pr-3">
                     <div className="font-medium">{row.displayName}</div>
@@ -310,7 +431,7 @@ export default function AnalyticsPage() {
                   <td className="py-2 pr-3 text-slate-600">
                     {row.inputUsdPerM == null
                       ? "—"
-                      : `$${row.inputUsdPerM.toFixed(2)} / $${row.outputUsdPerM?.toFixed(2)}`}
+                      : `$${formatExact(row.inputUsdPerM)} / $${formatExact(row.outputUsdPerM ?? 0)}`}
                   </td>
                   <td className="py-2 pr-3">{row.requests}</td>
                   <td className="py-2 pr-3">{tokens(row.inputTokens)}</td>
@@ -321,10 +442,18 @@ export default function AnalyticsPage() {
             </tbody>
           </table>
         </div>
+          )}
+        </PagedRows>
       </section>
 
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="mb-4 font-medium text-slate-900">Последние запросы</h2>
+        <PagedRows
+          items={report?.recent ?? []}
+          text={(row) => `${row.agentName} ${row.displayName} ${row.model}`}
+          placeholder="Поиск по агенту или модели"
+        >
+          {(rows) => (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="text-xs uppercase text-slate-500">
@@ -339,7 +468,7 @@ export default function AnalyticsPage() {
               </tr>
             </thead>
             <tbody>
-              {(report?.recent ?? []).map((row) => (
+              {rows.map((row) => (
                 <tr key={row.id} className="border-t border-violet-50">
                   <td className="py-2 pr-3 text-slate-500">{when(row.createdAt)}</td>
                   <td className="py-2 pr-3">{row.agentName}</td>
@@ -350,7 +479,7 @@ export default function AnalyticsPage() {
                   <td className="py-2">{row.costLabel}</td>
                 </tr>
               ))}
-              {!report?.recent.length && (
+              {!rows.length && (
                 <tr>
                   <td colSpan={7} className="py-4 text-slate-500">
                     Запросов ещё не было.
@@ -360,6 +489,8 @@ export default function AnalyticsPage() {
             </tbody>
           </table>
         </div>
+          )}
+        </PagedRows>
       </section>
     </div>
   );

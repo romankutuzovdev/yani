@@ -1,15 +1,15 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { error, json, requireAdmin, writeLog } from "@/lib/api";
+import { error, json, requireAdmin, requireAgentStaff, writeLog } from "@/lib/api";
 import { requestUsage } from "@/lib/agentQuota";
 
 type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_req: NextRequest, { params }: Params) {
-  const admin = await requireAdmin();
-  if (admin instanceof Response) return admin;
   const { id } = await params;
+  const staff = await requireAgentStaff(id);
+  if (staff instanceof Response) return staff;
 
   const agent = await prisma.agent.findUnique({
     where: { id },
@@ -25,7 +25,27 @@ export async function GET(_req: NextRequest, { params }: Params) {
     },
   });
   if (!agent) return error("Agent not found", 404);
-  return json({ agent: { ...agent, ...requestUsage(agent) } });
+  const orgUser = await prisma.user.findFirst({
+    where: { orgAgentId: id, role: "ORG" },
+    select: { email: true, orgName: true, orgUnp: true, planName: true, planMonthlyPrice: true },
+  });
+  const payload = {
+    ...agent,
+    ...requestUsage(agent),
+    orgEmail: staff.role === "ADMIN" ? (orgUser?.email ?? "") : "",
+    orgName: orgUser?.orgName ?? "",
+    orgUnp: orgUser?.orgUnp ?? "",
+    planName: orgUser?.planName ?? "",
+    planMonthlyPrice: orgUser?.planMonthlyPrice ?? 0,
+  };
+  if (staff.role === "ORG") {
+    payload.model = "";
+    payload.skills = payload.skills.map((row) => ({
+      ...row,
+      skill: { ...row.skill, model: "" },
+    }));
+  }
+  return json({ agent: payload });
 }
 
 const updateSchema = z.object({
@@ -33,6 +53,7 @@ const updateSchema = z.object({
   description: z.string().optional(),
   logoUrl: z.string().optional(),
   greeting: z.string().optional(),
+  asideText: z.string().optional(),
   personality: z.string().optional(),
   role: z.string().optional(),
   communicationStyle: z.string().optional(),
@@ -49,6 +70,7 @@ const updateSchema = z.object({
   dailyRequestLimit: z.number().int().min(0).max(1_000_000).optional(),
   monthlyRequestLimit: z.number().int().min(0).max(1_000_000).optional(),
   enabled: z.boolean().optional(),
+  isPrimary: z.boolean().optional(),
   skillIds: z.array(z.string()).optional(),
   /** Full assignment with order/visibility for the agent */
   skillAssignments: z
@@ -65,16 +87,36 @@ const updateSchema = z.object({
 });
 
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const admin = await requireAdmin();
-  if (admin instanceof Response) return admin;
   const { id } = await params;
+  const staff = await requireAgentStaff(id);
+  if (staff instanceof Response) return staff;
 
   try {
     const body = updateSchema.parse(await req.json());
     const existing = await prisma.agent.findUnique({ where: { id } });
     if (!existing) return error("Agent not found", 404);
 
-    const { skillIds, skillAssignments, toolIds, ...data } = body;
+    const { skillIds: rawSkillIds, skillAssignments: rawAssignments, toolIds, ...data } = body;
+    let skillAssignments = rawAssignments;
+    let skillIds = rawSkillIds;
+    if (staff.role === "ORG") {
+      delete data.model;
+      delete data.logoUrl;
+      delete data.dailyRequestLimit;
+      delete data.monthlyRequestLimit;
+      delete data.enabled;
+      delete data.isPrimary;
+      const linked = await prisma.agentSkill.findMany({
+        where: { agentId: id },
+        select: { skillId: true },
+      });
+      const allowed = new Set(linked.map((row) => row.skillId));
+      if (skillAssignments) {
+        skillAssignments = skillAssignments.filter((row) => allowed.has(row.skillId));
+      }
+      if (skillIds) skillIds = skillIds.filter((skillId) => allowed.has(skillId));
+      if (toolIds) return error("Forbidden", 403);
+    }
 
     if (skillAssignments) {
       await prisma.agentSkill.deleteMany({ where: { agentId: id } });
@@ -112,6 +154,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       }
     }
 
+    const makePrimary = data.isPrimary === true;
     const agent = await prisma.agent.update({
       where: { id },
       data,
@@ -125,13 +168,29 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       },
     });
 
+    if (makePrimary) {
+      await prisma.agent.updateMany({
+        where: { id: { not: id } },
+        data: { isPrimary: false },
+      });
+    }
+
     await writeLog({
       type: "agent",
       message: `Updated agent ${agent.name}`,
       agentId: agent.id,
-      userId: admin.id,
+      userId: staff.id,
     });
 
+    if (staff.role === "ORG") {
+      return json({
+        agent: {
+          ...agent,
+          model: "",
+          skills: agent.skills.map((row) => ({ ...row, skill: { ...row.skill, model: "" } })),
+        },
+      });
+    }
     return json({ agent });
   } catch (e) {
     if (e instanceof z.ZodError) return error(e.issues[0]?.message ?? "Invalid input");
@@ -145,6 +204,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const { id } = await params;
   const agent = await prisma.agent.findUnique({ where: { id } });
   if (!agent) return error("Agent not found", 404);
+  await prisma.user.deleteMany({ where: { orgAgentId: id, role: "ORG" } });
   await prisma.agent.delete({ where: { id } });
   if (agent.characterId) {
     await prisma.agentCharacter.delete({ where: { id: agent.characterId } }).catch(() => undefined);

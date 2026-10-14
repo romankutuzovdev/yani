@@ -9,6 +9,7 @@ export default async function AdminLayout({
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
+  if (session.role === "ORG") redirect("/org");
   if (session.role !== "ADMIN") redirect("/login");
 
   return <AdminShell userName={session.name || session.email}>{children}</AdminShell>;

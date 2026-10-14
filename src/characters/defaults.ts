@@ -24,17 +24,26 @@ export const DEFAULT_HERO_ASSETS: Array<{
   mimeType: "image/png",
 }));
 
-/** Merge DB assets with defaults so hero always has something to show */
+function isStoredVideo(asset: { url: string; type?: string; mimeType?: string }) {
+  if (asset.type === "VIDEO") return true;
+  if (asset.mimeType?.startsWith("video/")) return true;
+  return /\.(webm|mp4|ogv|ogg)(\?|$)/i.test(asset.url);
+}
+
+/** Fill missing hero media. Leave stored mp4/webm URLs and video mime types as they are. */
 export function withDefaultHeroAssets<
   T extends { state: string; url: string; type?: string; mimeType?: string },
 >(assets: T[] | null | undefined) {
   const list = assets ?? [];
   if (list.length > 0) {
-    return list.map((a) => ({
-      ...a,
-      url: a.url.replace(/\.jpe?g$/i, ".png"),
-      mimeType: a.mimeType?.startsWith("video/") ? a.mimeType : a.mimeType || "image/png",
-    }));
+    return list.map((asset) => {
+      if (isStoredVideo(asset)) return asset;
+      return {
+        ...asset,
+        url: asset.url.replace(/\.jpe?g$/i, ".png"),
+        mimeType: asset.mimeType || "image/png",
+      };
+    });
   }
   return DEFAULT_HERO_ASSETS;
 }

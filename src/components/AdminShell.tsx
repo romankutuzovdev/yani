@@ -3,28 +3,43 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, Bot, KeyRound, LayoutDashboard, Settings, Shield, Sparkles } from "lucide-react";
+import { BarChart3, Bot, KeyRound, LayoutDashboard, ScrollText, Settings, Shield, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const NAV = [
+const ADMIN_NAV = [
   { href: "/admin", label: "Обзор", icon: LayoutDashboard },
   { href: "/admin/agents", label: "Агенты", icon: Bot },
   { href: "/admin/skills", label: "Навыки", icon: Sparkles },
   { href: "/admin/analytics", label: "Аналитика", icon: BarChart3 },
   { href: "/admin/visitors", label: "Запросы", icon: Shield },
+  { href: "/admin/logs", label: "Журнал", icon: ScrollText },
   { href: "/admin/api-keys", label: "API-ключи", icon: KeyRound },
   { href: "/admin/settings", label: "Настройки", icon: Settings },
+];
+
+const ORG_NAV = [
+  { href: "/org", label: "Обзор", icon: LayoutDashboard },
+  { href: "/org/agents", label: "Агенты", icon: Bot },
+  { href: "/org/skills", label: "Навыки", icon: Sparkles },
+  { href: "/org/requests", label: "Запросы", icon: Shield },
+  { href: "/org/settings", label: "Настройки", icon: Settings },
 ];
 
 export function AdminShell({
   children,
   userName,
+  area = "admin",
+  chatHref = "/chat",
 }: {
   children: React.ReactNode;
   userName: string;
+  area?: "admin" | "org";
+  chatHref?: string;
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const nav = area === "org" ? ORG_NAV : ADMIN_NAV;
+  const home = area === "org" ? "/org" : "/admin";
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -37,7 +52,7 @@ export function AdminShell({
       <div className="mx-auto flex min-h-screen max-w-[1400px]">
         <aside className="hidden w-64 shrink-0 border-r border-violet-100 bg-white/70 p-5 backdrop-blur md:block">
           <div className="mb-8">
-            <Link href="/admin" className="block px-1 py-1">
+            <Link href={home} className="block px-1 py-1">
               <Image
                 src="/brand/yani-logo.png"
                 alt="YANI"
@@ -50,10 +65,10 @@ export function AdminShell({
             <p className="mt-3 text-xs text-slate-500">Платформа AI-агентов</p>
           </div>
           <nav className="space-y-1">
-            {NAV.map((item) => {
+            {nav.map((item) => {
               const active =
                 pathname === item.href ||
-                (item.href !== "/admin" && pathname.startsWith(item.href));
+                (item.href !== home && pathname.startsWith(item.href));
               const Icon = item.icon;
               return (
                 <Link
@@ -74,7 +89,7 @@ export function AdminShell({
           </nav>
           <div className="mt-10 space-y-2 border-t border-violet-100 pt-4 text-xs text-slate-500">
             <p className="text-slate-700">{userName}</p>
-            <Link href="/chat" className="block text-violet-600 hover:underline">
+            <Link href={chatHref} className="block text-violet-600 hover:underline">
               Открыть чат клиента
             </Link>
             <button onClick={logout} className="text-slate-500 hover:text-violet-700">
@@ -82,7 +97,35 @@ export function AdminShell({
             </button>
           </div>
         </aside>
-        <main className="flex-1 p-4 md:p-8">{children}</main>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <nav className="flex gap-1 overflow-x-auto border-b border-violet-100 bg-white/80 px-3 py-2 md:hidden">
+            {nav.map((item) => {
+              const active =
+                pathname === item.href || (item.href !== home && pathname.startsWith(item.href));
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={
+                    active
+                      ? "shrink-0 rounded-lg bg-violet-100 px-3 py-1.5 text-sm font-medium text-violet-800"
+                      : "shrink-0 rounded-lg px-3 py-1.5 text-sm text-slate-600"
+                  }
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700"
+            >
+              Выйти
+            </button>
+          </nav>
+          <main className="flex-1 p-4 md:p-8">{children}</main>
+        </div>
       </div>
     </div>
   );

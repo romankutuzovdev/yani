@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { error, json, requireAdmin, writeLog } from "@/lib/api";
 import { runTask } from "@/modules/tasks/runTask";
+import { clampPage, readListQuery, wordsWhere } from "@/lib/paging";
 
 const taskSchema = z.object({
   agentId: z.string().min(1),
@@ -25,20 +26,25 @@ export async function GET(req: NextRequest) {
 
   const agentId = req.nextUrl.searchParams.get("agentId") ?? undefined;
   const status = req.nextUrl.searchParams.get("status") ?? undefined;
-
+  const { page, q } = readListQuery(req.nextUrl);
+  const where = {
+    ...(agentId ? { agentId } : {}),
+    ...(status ? { status: status as never } : {}),
+    ...wordsWhere(["title", "instruction"], q),
+  };
+  const total = await prisma.task.count({ where });
+  const meta = clampPage(page, total);
   const tasks = await prisma.task.findMany({
-    where: {
-      ...(agentId ? { agentId } : {}),
-      ...(status ? { status: status as never } : {}),
-    },
+    where,
     include: {
       agent: { select: { id: true, name: true, status: true } },
       executions: { orderBy: { startedAt: "desc" }, take: 1 },
     },
     orderBy: { createdAt: "desc" },
-    take: 100,
+    skip: (meta.page - 1) * meta.pageSize,
+    take: meta.pageSize,
   });
-  return json({ tasks });
+  return json({ tasks, ...meta });
 }
 
 export async function POST(req: NextRequest) {

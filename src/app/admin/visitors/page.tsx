@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { ListBar, PagedRows } from "@/components/PagedRows";
 
 type RequestRow = {
   id: string;
@@ -24,31 +25,32 @@ export default function VisitorsPage() {
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [blocks, setBlocks] = useState<BlockRow[]>([]);
   const [ips, setIps] = useState<IpCount[]>([]);
-  const [filter, setFilter] = useState("");
-  const [applied, setApplied] = useState("");
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [message, setMessage] = useState("");
 
-  async function load(ip = applied) {
-    const query = ip ? `?ip=${encodeURIComponent(ip)}` : "";
-    const res = await fetch(`/api/visitors${query}`);
+  async function load(nextPage = page, nextQuery = query) {
+    const params = new URLSearchParams({ page: String(nextPage), q: nextQuery });
+    const res = await fetch(`/api/visitors?${params}`);
     const data = await res.json();
     setRequests(data.requests ?? []);
     setBlocks(data.blocks ?? []);
     setIps(data.ips ?? []);
+    setPage(data.page ?? nextPage);
+    setPages(data.pages ?? 1);
+    setTotal(data.total ?? 0);
   }
 
   useEffect(() => {
-    void load("");
-    // first paint only
+    const timer = setTimeout(() => {
+      void load(1, query);
+    }, 250);
+    return () => clearTimeout(timer);
+    // reload when the search text changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function search(e: FormEvent) {
-    e.preventDefault();
-    const next = filter.trim();
-    setApplied(next);
-    void load(next);
-  }
+  }, [query]);
 
   async function block(ip: string) {
     setMessage("");
@@ -58,7 +60,7 @@ export default function VisitorsPage() {
       body: JSON.stringify({ ip }),
     });
     setMessage(res.ok ? `IP ${ip} заблокирован` : "Не удалось заблокировать");
-    await load();
+    await load(page, query);
   }
 
   async function unblock(ip: string) {
@@ -69,7 +71,7 @@ export default function VisitorsPage() {
       body: JSON.stringify({ ip }),
     });
     setMessage(res.ok ? `Блок снят: ${ip}` : "Не удалось снять блок");
-    await load();
+    await load(page, query);
   }
 
   return (
@@ -84,11 +86,27 @@ export default function VisitorsPage() {
 
       {message && <p className="text-sm text-violet-700">{message}</p>}
 
+      <ListBar
+        query={query}
+        onQuery={setQuery}
+        page={page}
+        pages={pages}
+        total={total}
+        onPage={(next) => {
+          setPage(next);
+          void load(next, query);
+        }}
+        placeholder="Поиск по словам, IP или агенту"
+      />
+
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="font-medium text-slate-900">Закрытые IP</h2>
-        {!blocks.length && <p className="mt-3 text-sm text-slate-400">Сейчас никого нет</p>}
-        <div className="mt-3 space-y-2">
-          {blocks.map((block) => (
+        <div className="mt-3">
+          <PagedRows items={blocks} text={(block) => `${block.ip} ${block.reason}`} placeholder="Поиск по закрытым IP">
+            {(rows) => (
+              <div className="space-y-2">
+                {!rows.length && <p className="text-sm text-slate-400">Сейчас никого нет</p>}
+                {rows.map((block) => (
             <div
               key={block.ip}
               className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-3 text-sm"
@@ -112,6 +130,9 @@ export default function VisitorsPage() {
               </button>
             </div>
           ))}
+              </div>
+            )}
+          </PagedRows>
         </div>
       </section>
 
@@ -122,11 +143,7 @@ export default function VisitorsPage() {
             <button
               key={row.ip}
               type="button"
-              onClick={() => {
-                setFilter(row.ip);
-                setApplied(row.ip);
-                void load(row.ip);
-              }}
+              onClick={() => setQuery(row.ip)}
               className="rounded-full bg-violet-50 px-3 py-1.5 text-sm text-violet-800 hover:bg-violet-100"
             >
               {row.ip} · {row.count}
@@ -135,31 +152,6 @@ export default function VisitorsPage() {
           {!ips.length && <p className="text-sm text-slate-400">Запросов за сутки нет</p>}
         </div>
       </section>
-
-      <form onSubmit={search} className="flex gap-2">
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Фильтр по IP"
-          className="w-full max-w-sm rounded-xl border border-violet-200 bg-white px-4 py-2.5"
-        />
-        <button className="rounded-xl bg-violet-600 px-4 py-2.5 font-medium text-white hover:bg-violet-500">
-          Показать
-        </button>
-        {applied && (
-          <button
-            type="button"
-            onClick={() => {
-              setFilter("");
-              setApplied("");
-              void load("");
-            }}
-            className="rounded-xl px-3 py-2.5 text-sm text-slate-500 hover:bg-violet-50"
-          >
-            Сбросить
-          </button>
-        )}
-      </form>
 
       <div className="overflow-x-auto rounded-2xl border border-violet-100 bg-white shadow-sm">
         <table className="min-w-full text-left text-sm">

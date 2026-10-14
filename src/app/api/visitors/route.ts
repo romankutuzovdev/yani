@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { error, json, requireAdmin } from "@/lib/api";
 import { clearVisitorHits } from "@/lib/visitorGuard";
+import { clampPage, readListQuery, wordsWhere } from "@/lib/paging";
 
 export const dynamic = "force-dynamic";
 
@@ -10,14 +11,11 @@ export async function GET(req: NextRequest) {
   const admin = await requireAdmin();
   if (admin instanceof Response) return admin;
 
-  const ip = req.nextUrl.searchParams.get("ip")?.trim() ?? "";
+  const { page, q } = readListQuery(req.nextUrl);
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const [requests, blocks, ipCounts] = await Promise.all([
-    prisma.visitorRequest.findMany({
-      where: ip ? { ip } : {},
-      orderBy: { createdAt: "desc" },
-      take: 200,
-    }),
+  const where = wordsWhere(["ip", "message", "agentName"], q);
+  const [total, blocks, ipCounts] = await Promise.all([
+    prisma.visitorRequest.count({ where }),
     prisma.ipBlock.findMany({ orderBy: { updatedAt: "desc" } }),
     prisma.visitorRequest.groupBy({
       by: ["ip"],
@@ -27,9 +25,17 @@ export async function GET(req: NextRequest) {
       take: 12,
     }),
   ]);
+  const meta = clampPage(page, total);
+  const requests = await prisma.visitorRequest.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    skip: (meta.page - 1) * meta.pageSize,
+    take: meta.pageSize,
+  });
 
   const now = Date.now();
   return json({
+    ...meta,
     requests: requests.map((row) => ({
       id: row.id,
       ip: row.ip,

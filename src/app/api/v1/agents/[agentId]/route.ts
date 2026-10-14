@@ -42,8 +42,10 @@ export async function GET(req: NextRequest, { params }: Params) {
       agent: {
         id: agent.id,
         name: agent.name,
+        slug: agent.slug,
         description: agent.description,
         logoUrl: agent.logoUrl || "/brand/yani-logo.png",
+        asideText: agent.asideText || "",
         status: agent.status,
         statusMessage: agent.statusMessage,
         character: agent.character
@@ -55,7 +57,21 @@ export async function GET(req: NextRequest, { params }: Params) {
               defaultState: "IDLE",
               assets: withDefaultHeroAssets(null),
             },
-        widget: agent.widgets[0] ?? null,
+        widget: agent.widgets[0]
+          ? {
+              ...agent.widgets[0],
+              config:
+                typeof agent.widgets[0].config === "string"
+                  ? (() => {
+                      try {
+                        return JSON.parse(agent.widgets[0].config);
+                      } catch {
+                        return {};
+                      }
+                    })()
+                  : agent.widgets[0].config,
+            }
+          : null,
       },
     },
     { headers: cors(origin) },

@@ -32,7 +32,10 @@ export function HeroBubble({
     () => (assets?.length ? assets : (DEFAULT_HERO_ASSETS as CharacterAssetView[])),
     [assets],
   );
-  const asset = resolveCharacterAsset(effectiveAssets, state);
+  const idle = resolveCharacterAsset(effectiveAssets, "IDLE");
+  const live = resolveCharacterAsset(effectiveAssets, state);
+  // Public chat bubble is a looping avatar: keep IDLE video, don't swap src on THINKING/WORKING.
+  const asset = isVideoAsset(idle) ? idle : live;
   const video = isVideoAsset(asset);
   const primary = asset ? normalizeAssetUrl(asset.url) : "/characters/yani/idle.png";
   const [src, setSrc] = useState(primary);
@@ -41,15 +44,10 @@ export function HeroBubble({
 
   useEffect(() => {
     setFailed(false);
-    setSrc(asset ? normalizeAssetUrl(asset.url) : "/characters/yani/idle.png");
-  }, [asset?.url, state]);
+    setSrc(primary);
+  }, [primary]);
 
-  useEffect(() => {
-    if (!video) return;
-    void videoRef.current?.play().catch(() => undefined);
-  }, [video, src]);
-
-  useKeepVideoPlaying(videoRef, video);
+  useKeepVideoPlaying(videoRef, video && !failed, src);
 
   const dim =
     size === "sm"
@@ -79,12 +77,18 @@ export function HeroBubble({
             muted
             playsInline
             preload="auto"
+            webkit-playsinline="true"
             aria-label={name}
-            onError={() => setFailed(true)}
-            onPause={() => {
-              if (document.visibilityState === "visible") {
-                void videoRef.current?.play().catch(() => undefined);
+            onError={() => {
+              const el = videoRef.current;
+              if (el?.dataset.heroReloading === "1") return;
+              const tries = Number(el?.dataset.heroRetries || "0");
+              // iOS PWA fires error when the decoder is dropped in background.
+              if (el && tries < 4) {
+                el.dataset.heroRetries = String(tries + 1);
+                return;
               }
+              setFailed(true);
             }}
           />
         ) : (

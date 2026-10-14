@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { formatExact } from "@/lib/money";
 
 type ModelOption = {
   id: string;
@@ -26,7 +27,7 @@ const CUSTOM = "__custom__";
 
 function priceLabel(model: ModelOption) {
   if (!model.pricing) return "";
-  return `$${model.pricing.inputUsdPerM.toFixed(2)} / $${model.pricing.outputUsdPerM.toFixed(2)} за 1 млн`;
+  return `$${formatExact(model.pricing.inputUsdPerM)} / $${formatExact(model.pricing.outputUsdPerM)} за 1 млн`;
 }
 
 function optionLabel(model: ModelOption) {

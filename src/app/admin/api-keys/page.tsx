@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PagedRows } from "@/components/PagedRows";
 
 type Key = {
   id: string;
@@ -74,8 +75,10 @@ export default function ApiKeysPage() {
         </div>
       )}
 
+      <PagedRows items={keys} text={(key) => `${key.name} ${key.keyPrefix}`} placeholder="Поиск по ключам">
+        {(rows) => (
       <div className="space-y-3">
-        {keys.map((key) => (
+        {rows.map((key) => (
           <div
             key={key.id}
             className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-violet-100 bg-white px-5 py-4 shadow-sm"
@@ -104,6 +107,8 @@ export default function ApiKeysPage() {
           </div>
         ))}
       </div>
+        )}
+      </PagedRows>
     </div>
   );
 }

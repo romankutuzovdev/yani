@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { ModelSelect } from "@/components/ModelSelect";
+import { formatExact } from "@/lib/money";
+import { PagedRows } from "@/components/PagedRows";
 
 type Usage = {
   totals: {
@@ -38,30 +41,60 @@ type Usage = {
   }>;
 };
 
+type SiteSeo = {
+  title: string;
+  description: string;
+  keywords: string;
+  siteName: string;
+  faviconUrl: string;
+  ogImageUrl: string;
+};
+
+const emptySeo: SiteSeo = {
+  title: "",
+  description: "",
+  keywords: "",
+  siteName: "",
+  faviconUrl: "",
+  ogImageUrl: "",
+};
+
 export default function SettingsPage() {
+  const orgMode = usePathname().startsWith("/org");
   const [model, setModel] = useState("");
   const [saved, setSaved] = useState("");
   const [message, setMessage] = useState("");
   const [usage, setUsage] = useState<Usage | null>(null);
   const [usageError, setUsageError] = useState("");
+  const [seo, setSeo] = useState<SiteSeo>(emptySeo);
+  const [seoNote, setSeoNote] = useState("");
+  const [sitemapUrl, setSitemapUrl] = useState("");
 
   useEffect(() => {
-    void fetch("/api/llm/default-model")
+    if (!orgMode) {
+      void fetch("/api/llm/default-model")
+        .then((r) => r.json())
+        .then((d) => {
+          setModel(d.model ?? "");
+          setSaved(d.model ?? "");
+        });
+      void fetch("/api/llm/usage")
+        .then(async (r) => {
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error ?? "Не удалось посчитать расходы");
+          setUsage(data);
+        })
+        .catch((e: unknown) => {
+          setUsageError(e instanceof Error ? e.message : "Не удалось посчитать расходы");
+        });
+    }
+    void fetch("/api/site/seo")
       .then((r) => r.json())
       .then((d) => {
-        setModel(d.model ?? "");
-        setSaved(d.model ?? "");
+        if (d.seo) setSeo(d.seo);
+        if (d.sitemapUrl) setSitemapUrl(d.sitemapUrl);
       });
-    void fetch("/api/llm/usage")
-      .then(async (r) => {
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error ?? "Не удалось посчитать расходы");
-        setUsage(data);
-      })
-      .catch((e: unknown) => {
-        setUsageError(e instanceof Error ? e.message : "Не удалось посчитать расходы");
-      });
-  }, []);
+  }, [orgMode]);
 
   async function saveModel() {
     setMessage("");
@@ -79,13 +112,146 @@ export default function SettingsPage() {
     setMessage("Модель по умолчанию сохранена. У каждого агента своя модель в его карточке.");
   }
 
+  async function saveSeo() {
+    setSeoNote("");
+    const res = await fetch("/api/site/seo", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: seo.title,
+        description: seo.description,
+        keywords: seo.keywords,
+        siteName: seo.siteName,
+      }),
+    });
+    const data = await res.json();
+    setSeoNote(res.ok ? "SEO сохранено" : (data.error ?? "Не сохранилось"));
+    if (data.seo) setSeo(data.seo);
+  }
+
+  async function uploadSiteImage(kind: "favicon" | "og", file: File) {
+    setSeoNote("");
+    const body = new FormData();
+    body.set("file", file);
+    const res = await fetch(`/api/site/seo?kind=${kind}`, { method: "POST", body });
+    const data = await res.json();
+    setSeoNote(res.ok ? "Картинка сохранена" : (data.error ?? "Не загрузилось"));
+    if (data.seo) setSeo(data.seo);
+  }
+
+  const fieldClass =
+    "mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2 text-sm outline-none focus:border-violet-400";
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold text-slate-900">Настройки</h1>
-        <p className="mt-1 text-slate-500">Модель по умолчанию и сколько уже потрачено на запросы</p>
+        <p className="mt-1 text-slate-500">
+          {orgMode ? "Иконка сайта и тексты для поиска" : "Модель, иконка сайта и тексты для поиска"}
+        </p>
       </div>
 
+      <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
+        <h2 className="font-medium text-slate-900">Иконка и SEO</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Фавикон виден во вкладке браузера. Название, описание и ключевые слова попадают в выдачу.
+          Карта сайта собирается сама.
+        </p>
+        <div className="mt-4 grid gap-4 lg:grid-cols-[160px_1fr]">
+          <div className="space-y-4">
+            <label className="flex h-24 w-24 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed border-violet-200 bg-violet-50 text-center text-xs text-violet-700">
+              {seo.faviconUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={seo.faviconUrl} alt="Фавикон" className="h-12 w-12 object-contain" />
+              ) : (
+                <span>Фавикон</span>
+              )}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon,.ico"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void uploadSiteImage("favicon", file);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <label className="flex h-24 w-40 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed border-violet-200 bg-violet-50 text-center text-xs text-violet-700">
+              {seo.ogImageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={seo.ogImageUrl} alt="Картинка для поиска" className="h-full w-full object-cover" />
+              ) : (
+                <span className="px-2">Картинка для поиска</span>
+              )}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void uploadSiteImage("og", file);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+          <div className="space-y-3">
+            <label className="block text-sm text-slate-700">
+              Название сайта
+              <input
+                className={fieldClass}
+                value={seo.siteName}
+                onChange={(e) => setSeo({ ...seo, siteName: e.target.value })}
+              />
+            </label>
+            <label className="block text-sm text-slate-700">
+              Заголовок в поиске
+              <input
+                className={fieldClass}
+                value={seo.title}
+                onChange={(e) => setSeo({ ...seo, title: e.target.value })}
+              />
+            </label>
+            <label className="block text-sm text-slate-700">
+              Описание
+              <textarea
+                className={fieldClass}
+                rows={3}
+                value={seo.description}
+                onChange={(e) => setSeo({ ...seo, description: e.target.value })}
+              />
+            </label>
+            <label className="block text-sm text-slate-700">
+              Ключевые слова через запятую
+              <input
+                className={fieldClass}
+                value={seo.keywords}
+                onChange={(e) => setSeo({ ...seo, keywords: e.target.value })}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => void saveSeo()}
+              className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500"
+            >
+              Сохранить SEO
+            </button>
+            {seoNote && <p className="text-sm text-slate-600">{seoNote}</p>}
+            {sitemapUrl && (
+              <p className="text-xs text-slate-500">
+                Карта сайта:{" "}
+                <a href={sitemapUrl} className="font-medium text-violet-700 hover:underline" target="_blank" rel="noreferrer">
+                  {sitemapUrl}
+                </a>
+              </p>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {!orgMode && (
+      <>
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="font-medium text-slate-900">Какую модель использовать</h2>
         <p className="mt-1 text-sm text-slate-500">
@@ -135,6 +301,12 @@ export default function SettingsPage() {
         <p className="mb-4 text-sm text-slate-500">
           Сумма считается по ценам vibecode: входные и выходные токены каждого запроса.
         </p>
+        <PagedRows
+          items={usage?.byModel ?? []}
+          text={(row) => `${row.displayName} ${row.model}`}
+          placeholder="Поиск по модели"
+        >
+          {(rows) => (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="text-xs uppercase text-slate-500">
@@ -147,7 +319,7 @@ export default function SettingsPage() {
               </tr>
             </thead>
             <tbody>
-              {(usage?.byModel ?? []).map((row) => (
+              {rows.map((row) => (
                 <tr key={row.model} className="border-t border-violet-50">
                   <td className="py-2 pr-3">
                     <div className="font-medium text-slate-800">{row.displayName}</div>
@@ -156,7 +328,7 @@ export default function SettingsPage() {
                   <td className="py-2 pr-3 text-slate-600">
                     {row.inputUsdPerM == null
                       ? "—"
-                      : `$${row.inputUsdPerM.toFixed(2)} / $${row.outputUsdPerM?.toFixed(2)} за 1 млн`}
+                      : `$${formatExact(row.inputUsdPerM)} / $${formatExact(row.outputUsdPerM ?? 0)} за 1 млн`}
                   </td>
                   <td className="py-2 pr-3">{row.requests}</td>
                   <td className="py-2 pr-3 text-slate-600">
@@ -165,7 +337,7 @@ export default function SettingsPage() {
                   <td className="py-2 font-medium">{row.costLabel}</td>
                 </tr>
               ))}
-              {!usage?.byModel.length && (
+              {!rows.length && (
                 <tr>
                   <td colSpan={5} className="py-4 text-slate-500">
                     Запросов ещё не было — сумма появится после первого ответа в чате.
@@ -175,10 +347,18 @@ export default function SettingsPage() {
             </tbody>
           </table>
         </div>
+          )}
+        </PagedRows>
       </section>
 
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="mb-4 font-medium text-slate-900">Потрачено по агентам</h2>
+        <PagedRows
+          items={usage?.byAgent ?? []}
+          text={(row) => `${row.name} ${row.currentModel}`}
+          placeholder="Поиск по агентам"
+        >
+          {(rows) => (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="text-xs uppercase text-slate-500">
@@ -190,7 +370,7 @@ export default function SettingsPage() {
               </tr>
             </thead>
             <tbody>
-              {(usage?.byAgent ?? []).map((row) => (
+              {rows.map((row) => (
                 <tr key={row.agentId} className="border-t border-violet-50">
                   <td className="py-2 pr-3 font-medium text-slate-800">{row.name}</td>
                   <td className="py-2 pr-3 font-mono text-xs text-slate-500">{row.currentModel || "—"}</td>
@@ -198,7 +378,7 @@ export default function SettingsPage() {
                   <td className="py-2 font-medium">{row.costLabel}</td>
                 </tr>
               ))}
-              {!usage?.byAgent.length && (
+              {!rows.length && (
                 <tr>
                   <td colSpan={4} className="py-4 text-slate-500">
                     Пока нет расходов по агентам.
@@ -208,7 +388,11 @@ export default function SettingsPage() {
             </tbody>
           </table>
         </div>
+          )}
+        </PagedRows>
       </section>
+      </>
+      )}
     </div>
   );
 }

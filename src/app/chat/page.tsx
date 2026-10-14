@@ -4,8 +4,13 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { HeroBubble } from "@/components/HeroBubble";
 import type { CharacterAssetView } from "@/characters/CharacterRenderer";
-import { ArrowUp, History, Menu, MessageSquarePlus, Sparkles, Trash2, X } from "lucide-react";
-import { hideOpenButtonToken, splitReplyButtons } from "@/lib/replyButtons";
+import { ArrowUp, FileText, History, Menu, MessageSquarePlus, Sparkles, Trash2, X } from "lucide-react";
+import { InstallAppButton } from "@/components/InstallAppButton";
+import { VoiceInputButton } from "@/components/VoiceInputButton";
+import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { ThinkingDots } from "@/components/ThinkingDots";
+import { hideOpenButtonToken, splitReplyButtons, type ReplyButton } from "@/lib/replyButtons";
+import { CHAT_UNAVAILABLE, toChatUserMessage } from "@/lib/chatUserError";
 import { cn } from "@/lib/utils";
 
 type SkillTile = {
@@ -20,13 +25,18 @@ type SkillTile = {
 type AgentCard = {
   id: string;
   name: string;
+  slug: string;
   description: string;
   logoUrl: string;
+  homeIconUrl: string;
   greeting: string;
+  asideText: string;
+  orgName: string;
   status: string;
   statusMessage: string;
   character: { assets: CharacterAssetView[] } | null;
   skills: SkillTile[];
+  docs: { id: string; title: string; url: string; openMode: "preview" | "direct" }[];
 };
 
 type ChatMsg = {
@@ -80,10 +90,14 @@ export default function ClientChatPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [docsOpen, setDocsOpen] = useState(false);
+  const [popup, setPopup] = useState<ReplyButton | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputSizerRef = useRef<HTMLDivElement>(null);
+  const [inputScroll, setInputScroll] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -91,7 +105,9 @@ export default function ClientChatPage() {
   }, []);
 
   useEffect(() => {
-    void fetch("/api/v1/agents/by-slug/alex")
+    const fromQuery = new URLSearchParams(window.location.search).get("slug")?.trim() ?? "";
+    const slug = /^[a-z0-9][a-z0-9-]{0,80}$/i.test(fromQuery) ? fromQuery : "primary";
+    void fetch(`/api/v1/agents/by-slug/${encodeURIComponent(slug)}`)
       .then((r) => r.json())
       .then((data) => {
         if (!data.agent) {
@@ -99,6 +115,15 @@ export default function ClientChatPage() {
           return;
         }
         setAgent(data.agent);
+        const loaded = data.agent.slug as string;
+        if (loaded && /^[a-z0-9][a-z0-9-]{0,80}$/i.test(loaded)) {
+          const url = new URL(window.location.href);
+          if (url.searchParams.get("slug") !== loaded) {
+            url.pathname = "/chat";
+            url.searchParams.set("slug", loaded);
+            window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+          }
+        }
       })
       .catch(() => setError("Не удалось загрузить агента"));
   }, []);
@@ -109,16 +134,15 @@ export default function ClientChatPage() {
     es.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data);
-        setAgent((prev) =>
-          prev
-            ? {
-                ...prev,
-                status: data.status,
-                statusMessage: data.statusMessage,
-                character: data.character ?? prev.character,
-              }
-            : prev,
-        );
+        setAgent((prev) => {
+          if (!prev) return prev;
+          if (prev.status === data.status && prev.statusMessage === data.statusMessage) return prev;
+          return {
+            ...prev,
+            status: data.status,
+            statusMessage: data.statusMessage,
+          };
+        });
       } catch {
         /* ignore */
       }
@@ -131,13 +155,6 @@ export default function ClientChatPage() {
     if (!box) return;
     box.scrollTop = box.scrollHeight;
   }, [messages, busy]);
-
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "0px";
-    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-  }, [input]);
 
   // Keyboard: only interactive-widget=resizes-content + h-dvh.
   // Do not pin/translate the shell to visualViewport — that double-moves
@@ -173,6 +190,12 @@ export default function ClientChatPage() {
   const hasConversation = messages.some((m) => m.role === "user");
   const limitLocked = messages.some((m) => m.limit === "month" || m.limit === "day");
   const greeting = agent?.greeting || "Чем я могу помочь?";
+
+  useEffect(() => {
+    const sizer = inputSizerRef.current;
+    if (!sizer) return;
+    setInputScroll(sizer.scrollHeight > 120);
+  }, [input, greeting, limitLocked]);
 
   function persistSession(nextMessages: ChatMsg[]) {
     const title =
@@ -263,7 +286,7 @@ export default function ClientChatPage() {
           ...withUser,
           {
             role: "assistant",
-            content: data.reply ?? data.error ?? "Не удалось получить ответ",
+            content: toChatUserMessage(data.reply ?? data.error ?? CHAT_UNAVAILABLE),
           },
         ];
         setMessages(next);
@@ -298,20 +321,23 @@ export default function ClientChatPage() {
             acc += data.delta;
             setMessages([...withUser, { role: "assistant", content: acc }]);
           }
-          if (data.error) failed = data.error;
+          if (data.error) failed = toChatUserMessage(data.error);
           if (data.done && data.reply) acc = data.reply;
         }
       }
       const next: ChatMsg[] = [
         ...withUser,
-        { role: "assistant", content: acc.trim() || failed || "Пустой ответ" },
+        {
+          role: "assistant",
+          content: acc.trim() || failed || CHAT_UNAVAILABLE,
+        },
       ];
       setMessages(next);
       persistSession(next);
     } catch {
       const next = [
         ...withUser,
-        { role: "assistant" as const, content: "Сетевая ошибка. Попробуйте ещё раз." },
+        { role: "assistant" as const, content: CHAT_UNAVAILABLE },
       ];
       setMessages(next);
       persistSession(next);
@@ -330,37 +356,51 @@ export default function ClientChatPage() {
   return (
     <div
       ref={shellRef}
-      className="fixed inset-x-0 top-0 flex h-dvh flex-col overflow-hidden bg-white text-slate-900"
+      className="fixed inset-0 flex flex-col overflow-hidden bg-white text-slate-900"
     >
       {/* Header — never scrolls away */}
-      <header className="z-30 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-yani-ring/40 bg-white px-5 sm:h-16 sm:px-6">
-        <Link href="/chat" className="flex min-w-0 items-center gap-2" onClick={startNewChat}>
-          {agent?.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={agent.logoUrl}
-              alt="yani"
-              className="h-7 w-auto max-w-[100px] object-contain sm:h-8 sm:max-w-[120px]"
-            />
-          ) : (
-            <span className="text-base font-semibold tracking-tight text-slate-900 sm:text-lg">
-              yani
-            </span>
-          )}
+      <header className="z-30 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-yani-ring/40 bg-white px-4 md:h-16 md:px-6">
+        <Link
+          href={agent?.slug ? `/chat?slug=${encodeURIComponent(agent.slug)}` : "/chat"}
+          className="flex min-w-0 items-center gap-2"
+          onClick={startNewChat}
+        >
+          {/* Brand mark only — agent logo must not replace Yani in the header */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/yani-logo.png"
+            alt="yani"
+            className="h-8 w-auto max-w-[72px] object-contain md:max-w-[120px]"
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+              const next = e.currentTarget.nextElementSibling;
+              if (next instanceof HTMLElement) next.hidden = false;
+            }}
+          />
+          <span hidden className="text-lg font-semibold tracking-tight text-slate-900">
+            yani
+          </span>
         </Link>
 
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
+          {agent?.slug ? (
+            <InstallAppButton
+              slug={agent.slug}
+              name={agent.orgName || agent.name}
+              iconUrl={agent.homeIconUrl || ""}
+            />
+          ) : null}
           <button
             type="button"
             onClick={() => {
               setHistoryOpen(true);
               setMenuOpen(false);
             }}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 active:bg-slate-50 sm:h-auto sm:w-auto sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-sm"
+            className="inline-flex h-10 w-10 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white text-sm text-slate-700 active:bg-slate-50 md:h-auto md:w-auto md:px-3 md:py-1.5"
             aria-label="История чатов"
           >
             <History size={16} />
-            <span className="hidden sm:inline">История чатов</span>
+            <span className="hidden md:inline">История чатов</span>
           </button>
           <button
             type="button"
@@ -384,23 +424,30 @@ export default function ClientChatPage() {
         </div>
       </header>
 
-      {/* Hero — fixed in layout, not in scroll area (survives keyboard) */}
-      <div className="flex shrink-0 flex-col items-center bg-white px-5 pb-2 pt-2 sm:px-6 sm:pb-3 sm:pt-3">
-        {agent ? (
-          <HeroBubble
-            name={agent.name}
-            assets={agent.character?.assets ?? []}
-            status={agent.status}
-            size="lg"
-            className="h-24 w-24 sm:h-40 sm:w-40 md:h-48 md:w-48"
-          />
-        ) : (
-          <div className="flex h-24 w-24 items-center justify-center rounded-full bg-slate-50 text-slate-400 sm:h-40 sm:w-40">
-            …
-          </div>
-        )}
+      {/* Hero — stays on screen, including phones */}
+      <div className="flex shrink-0 flex-col items-center bg-white px-4 pb-2 pt-3 md:px-6 md:pb-3">
+        <div className="flex items-center justify-center gap-3 md:gap-5">
+          {agent ? (
+            <HeroBubble
+              name={agent.name}
+              assets={agent.character?.assets ?? []}
+              status={agent.status}
+              size="lg"
+              className="h-28 w-28 shrink-0 md:h-48 md:w-48"
+            />
+          ) : (
+            <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-400 md:h-48 md:w-48">
+              …
+            </div>
+          )}
+          {agent?.asideText?.trim() ? (
+            <p className="max-w-[11rem] whitespace-pre-wrap text-left text-sm leading-snug text-slate-600 sm:max-w-xs sm:text-base md:block">
+              {agent.asideText.trim()}
+            </p>
+          ) : null}
+        </div>
         {hasConversation && (
-          <p className="mt-1.5 text-xs text-slate-500">
+          <p className="mt-1.5 hidden text-xs text-slate-500 md:block">
             {activeSkill ? `Навык: ${activeSkill.name}` : agent?.name ?? "Yani"}
           </p>
         )}
@@ -409,7 +456,7 @@ export default function ClientChatPage() {
       {/* Only this middle zone scrolls */}
       <div
         ref={messagesRef}
-        className="mx-auto min-h-0 w-full max-w-3xl flex-1 overflow-y-auto overscroll-contain px-5 sm:px-6"
+        className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col overflow-y-auto overscroll-contain px-4 md:px-6"
       >
         {!hasConversation ? (
           <section className="flex flex-col items-center justify-start pb-4 text-center">
@@ -427,30 +474,28 @@ export default function ClientChatPage() {
               </p>
             )}
 
+            {agent && agent.skills.length > 0 && (
             <div className="mt-6 w-full pb-4 sm:mt-8">
-              <div className="relative mb-2.5 flex h-7 items-center justify-center sm:mb-3 sm:h-8">
-                <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-slate-400 sm:text-sm">
+              <div className="mb-3 grid grid-cols-[1fr_auto_1fr] items-center">
+                <span />
+                <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-slate-400">
                   <Sparkles size={14} className="text-slate-400" />
                   Навыки
                 </p>
-                {activeSkillId && (
-                  <button
-                    type="button"
-                    onClick={() => setActiveSkillId(null)}
-                    aria-label="Все навыки"
-                    className="absolute right-0 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center text-slate-500 active:text-slate-800 sm:h-8 sm:w-8"
-                  >
-                    <svg viewBox="0 0 24 24" className="h-4 w-4 sm:h-[18px] sm:w-[18px]" aria-hidden>
-                      <path
-                        fill="currentColor"
-                        d="M12.2 5.1A6.9 6.9 0 1 0 18.6 16a1.35 1.35 0 1 0-2.2-1.55A4.2 4.2 0 1 1 12.15 7.8h.15l-1.15 1.15a1.35 1.35 0 0 0 1.91 1.91l3.05-3.05a1.35 1.35 0 0 0 0-1.91L13.06 2.85a1.35 1.35 0 1 0-1.91 1.91l1.05 1.05v.29Z"
-                      />
-                    </svg>
-                  </button>
-                )}
+                <div className="flex justify-end">
+                  {activeSkillId && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveSkillId(null)}
+                      className="rounded-full bg-yani-deep px-3 py-1 text-xs font-medium text-white shadow-sm active:bg-yani-mid"
+                    >
+                      Закрыть
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4">
-                {(agent?.skills ?? []).map((skill) => {
+                {agent.skills.map((skill) => {
                   const active = activeSkillId === skill.id;
                   return (
                     <button
@@ -461,7 +506,7 @@ export default function ClientChatPage() {
                         "flex w-full flex-col items-center justify-center gap-1.5 rounded-2xl border px-2 py-3 text-center transition active:scale-[0.98] sm:gap-2 sm:px-3 sm:py-4",
                         active
                           ? "border-yani-mid bg-yani-soft ring-2 ring-yani-ring/50"
-                          : "border-slate-200 bg-white active:bg-slate-50 sm:hover:border-slate-300 sm:hover:bg-slate-50",
+                          : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 active:bg-slate-50",
                       )}
                     >
                       <div className="mx-auto flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-slate-100 sm:h-11 sm:w-11">
@@ -478,15 +523,13 @@ export default function ClientChatPage() {
                     </button>
                   );
                 })}
-                {agent && !agent.skills.length && (
-                  <p className="col-span-full py-4 text-sm text-slate-400">Навыки не назначены</p>
-                )}
               </div>
             </div>
+            )}
           </section>
         ) : (
           <section className="flex flex-col pb-2">
-            <div className="space-y-3 sm:space-y-4">
+            <div className="space-y-4">
               {messages.map((m, i) => {
                 if (m.limit) {
                   const month = m.limit === "month";
@@ -507,22 +550,30 @@ export default function ClientChatPage() {
                   );
                 }
                 const typing = busy && i === messages.length - 1 && m.role === "assistant";
-                const raw = m.content || (typing ? "Думаю…" : "");
+                const waiting = typing && !m.content;
+                const raw = m.content || "";
                 const parsed =
                   m.role === "assistant" ? splitReplyButtons(hideOpenButtonToken(raw)) : { text: raw, buttons: [] };
                 return (
                   <div
                     key={i}
                     className={cn(
-                      "max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed sm:max-w-[92%] sm:px-4 sm:py-3",
+                      "max-w-[92%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed",
                       m.role === "user"
                         ? "ml-auto bg-yani-deep text-white"
                         : "bg-yani-soft/70 text-slate-800",
                     )}
                   >
-                    {parsed.text ? (
-                      <div className="whitespace-pre-wrap break-words">
-                        {parsed.text}
+                    {waiting ? (
+                      <div className="break-words text-slate-600">
+                        <ThinkingDots />
+                      </div>
+                    ) : parsed.text ? (
+                      <div className="break-words">
+                        <ChatMarkdown
+                          text={parsed.text}
+                          variant={m.role === "user" ? "user" : "assistant"}
+                        />
                         {typing && m.content ? (
                           <span className="ml-0.5 inline-block animate-pulse text-yani-deep">▍</span>
                         ) : null}
@@ -530,17 +581,28 @@ export default function ClientChatPage() {
                     ) : null}
                     {parsed.buttons.length ? (
                       <div className={cn("flex flex-col gap-2", parsed.text && "mt-3")}>
-                        {parsed.buttons.map((button) => (
-                          <a
-                            key={button.label + button.href}
-                            href={button.href}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="rounded-xl bg-violet-600 px-3 py-2.5 text-center text-sm font-medium text-white hover:bg-violet-500"
-                          >
-                            {button.label}
-                          </a>
-                        ))}
+                        {parsed.buttons.map((button) =>
+                          button.popup ? (
+                            <button
+                              key={button.label + button.href}
+                              type="button"
+                              onClick={() => setPopup(button)}
+                              className="rounded-xl bg-yani-btn px-3 py-2.5 text-center text-sm font-medium !text-slate-900 hover:bg-yani-btn-hover"
+                            >
+                              {button.label}
+                            </button>
+                          ) : (
+                            <a
+                              key={button.label + button.href}
+                              href={button.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="rounded-xl bg-yani-btn px-3 py-2.5 text-center text-sm font-medium !text-slate-900 hover:bg-yani-btn-hover"
+                            >
+                              {button.label}
+                            </a>
+                          ),
+                        )}
                       </div>
                     ) : null}
                   </div>
@@ -556,15 +618,15 @@ export default function ClientChatPage() {
 
       {/* Composer — in flex column, rides above keyboard */}
       <div
-        className="z-20 shrink-0 bg-gradient-to-t from-white via-white to-transparent px-5 pt-2 sm:px-6 sm:pt-3"
-        style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
+        className="z-20 shrink-0 bg-gradient-to-t from-white via-white to-transparent px-6 pt-3"
+        style={{ paddingBottom: "max(2.75rem, calc(env(safe-area-inset-bottom) + 2.25rem))" }}
       >
         <form
           onSubmit={send}
-          className="mx-auto w-full max-w-3xl rounded-[1.35rem] border border-yani-ring/50 bg-white p-2.5 shadow-[0_8px_30px_rgba(139,111,212,0.12)] sm:rounded-3xl sm:p-3"
+          className="mx-auto w-full max-w-3xl rounded-3xl border border-yani-ring/50 bg-white p-3 shadow-[0_8px_30px_rgba(139,111,212,0.12)] focus-within:border-yani-deep"
         >
           {activeSkill && (
-            <div className="mb-1.5 flex items-center gap-2 px-1 sm:mb-2">
+            <div className="mb-2 flex items-center gap-2 px-1">
               <span className="max-w-[70%] truncate rounded-full bg-yani-soft px-2.5 py-0.5 text-xs text-yani-ink">
                 {activeSkill.name}
               </span>
@@ -578,23 +640,37 @@ export default function ClientChatPage() {
             </div>
           )}
           <div className="flex items-end gap-2">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              rows={1}
-              placeholder={
-                limitLocked ? "Лимит запросов исчерпан" : greeting
-              }
+            <div className="relative min-w-0 flex-1">
+              <div
+                ref={inputSizerRef}
+                aria-hidden
+                className={`max-h-[120px] min-h-[44px] overflow-hidden whitespace-pre-wrap break-words px-2 py-2 text-[15px] leading-snug ${
+                  input ? "invisible" : "text-slate-400"
+                }`}
+              >
+                {input || (limitLocked ? "Лимит запросов исчерпан" : greeting) || "\u00a0"}
+              </div>
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={onKeyDown}
+                rows={1}
+                disabled={!agent || busy || limitLocked}
+                enterKeyHint="send"
+                style={{ overflowY: inputScroll ? "auto" : "hidden" }}
+                className="chat-input absolute inset-0 w-full resize-none bg-transparent px-2 py-2 text-[15px] leading-snug text-slate-800 outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              />
+            </div>
+            <VoiceInputButton
               disabled={!agent || busy || limitLocked}
-              enterKeyHint="send"
-              className="max-h-[120px] min-h-[40px] w-full flex-1 resize-none bg-transparent px-2 py-2 text-base leading-snug outline-none placeholder:text-slate-400 sm:min-h-[44px] sm:text-[15px]"
+              value={input}
+              onChange={setInput}
             />
             <button
               type="submit"
               disabled={!agent || busy || limitLocked || !input.trim()}
-              className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-yani-deep text-white transition active:bg-yani-mid disabled:bg-slate-200 disabled:text-slate-400 sm:h-10 sm:w-10"
+              className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-yani-deep text-white transition active:bg-yani-mid disabled:bg-slate-200 disabled:text-slate-400"
               aria-label="Отправить"
             >
               <ArrowUp size={18} />
@@ -610,7 +686,7 @@ export default function ClientChatPage() {
           onClick={() => setHistoryOpen(false)}
         >
           <aside
-            className="flex h-full w-full max-w-full flex-col bg-white shadow-xl sm:max-w-sm"
+            className="flex h-full w-full max-w-sm flex-col bg-white shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex h-14 items-center justify-between border-b border-slate-100 px-4">
@@ -701,35 +777,108 @@ export default function ClientChatPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex h-14 items-center justify-between border-b border-slate-100 px-4">
-              <h2 className="font-medium">Меню</h2>
+              {docsOpen ? (
+                <button
+                  type="button"
+                  onClick={() => setDocsOpen(false)}
+                  className="text-sm font-medium text-slate-700"
+                >
+                  ← Меню
+                </button>
+              ) : (
+                <h2 className="font-medium">Меню</h2>
+              )}
               <button
                 type="button"
-                onClick={() => setMenuOpen(false)}
+                onClick={() => {
+                  setDocsOpen(false);
+                  setMenuOpen(false);
+                }}
                 className="inline-flex h-10 w-10 items-center justify-center rounded-lg active:bg-slate-50"
               >
                 <X size={18} />
               </button>
             </div>
-            <nav className="space-y-1 p-3 text-sm pb-[max(1rem,env(safe-area-inset-bottom))]">
-              <button
-                type="button"
-                onClick={startNewChat}
-                className="flex w-full items-center gap-2 rounded-xl px-3 py-3.5 text-left active:bg-slate-50"
-              >
-                <MessageSquarePlus size={16} /> Новый чат
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setHistoryOpen(true);
-                }}
-                className="flex w-full items-center gap-2 rounded-xl px-3 py-3.5 text-left active:bg-slate-50"
-              >
-                <History size={16} /> История чатов
-              </button>
+            <nav className="space-y-1 overflow-y-auto p-3 pb-[max(1rem,env(safe-area-inset-bottom))] text-sm">
+              {docsOpen ? (
+                (agent?.docs ?? []).length ? (
+                  (agent?.docs ?? []).map((doc) => (
+                    <button
+                      key={doc.id}
+                      type="button"
+                      onClick={() => {
+                        setDocsOpen(false);
+                        setMenuOpen(false);
+                        if (doc.openMode === "direct" && doc.url) {
+                          window.open(doc.url, "_blank", "noopener,noreferrer");
+                          return;
+                        }
+                        setPopup({ label: doc.title, href: `/docs/${doc.id}`, popup: true });
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-3.5 text-left active:bg-slate-50"
+                    >
+                      <FileText size={16} className="shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">{doc.title}</span>
+                    </button>
+                  ))
+                ) : (
+                  <p className="px-3 py-3.5 text-slate-500">Файлов пока нет</p>
+                )
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={startNewChat}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-3.5 text-left active:bg-slate-50"
+                  >
+                    <MessageSquarePlus size={16} /> Новый чат
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setHistoryOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-3.5 text-left active:bg-slate-50"
+                  >
+                    <History size={16} /> История чатов
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDocsOpen(true)}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-3.5 text-left active:bg-slate-50"
+                  >
+                    <FileText size={16} /> Документация
+                  </button>
+                </>
+              )}
             </nav>
           </aside>
+        </div>
+      )}
+
+      {popup && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/40 p-3 sm:items-center"
+          onClick={() => setPopup(null)}
+        >
+          <div
+            className="flex h-[min(92dvh,760px)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-3">
+              <p className="truncate text-sm font-medium text-slate-800">{popup.label}</p>
+              <button
+                type="button"
+                onClick={() => setPopup(null)}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50"
+                aria-label="Закрыть"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <iframe title={popup.label} src={popup.href} className="min-h-0 w-full flex-1 border-0 bg-white" />
+          </div>
         </div>
       )}
 

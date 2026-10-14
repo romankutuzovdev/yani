@@ -43,7 +43,6 @@ export async function GET(req: NextRequest, { params }: Params) {
             status: true,
             statusMessage: true,
             updatedAt: true,
-            character: { include: { assets: true } },
           },
         });
         if (current) send(current);

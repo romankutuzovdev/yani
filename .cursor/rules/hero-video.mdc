@@ -1,0 +1,28 @@
+---
+description: Do not change hero video loop, rewind, or IDLE assets unless the user explicitly asks about the video
+globs: src/lib/useKeepVideoPlaying.ts,src/components/HeroBubble.tsx,src/components/CharacterStage.tsx,public/widget.js
+alwaysApply: true
+---
+
+# Hero video — do not “fix” unless asked
+
+Public chat (`/` → `/chat`) and the widget FAB show a looping IDLE hero clip. macOS Safari often ignores native `loop` and parks on the last frame.
+
+**Do not edit loop / rewind / watchdog logic** in `useKeepVideoPlaying.ts`, `HeroBubble.tsx`, `CharacterStage.tsx`, or `public/widget.js` unless the user **explicitly** asks about the hero video.
+
+Allowed Mac-safe behavior (already implemented — leave it):
+
+- Attributes: `loop muted playsInline autoPlay` (plus `webkit-playsinline`).
+- Rewind **only** in the last ~0.05–0.08s, **once per pass** (`wrapped` flag). Then `play()`.
+- `ended` → `currentTime = 0` + `play()`.
+- `visibilitychange` / `pageshow` / `focus`: resume `play()` **without** rewind if the clip is already playing.
+- No `setInterval` / rAF that sets `currentTime` on a clip still playing in the middle.
+
+Forbidden unless the user asks about the video:
+
+- Deleting IDLE `.mp4` / `.webm` from disk, `public/`, or `uploads/`.
+- Replacing a stored video `src` with a PNG/JPG “fallback” or default pack image.
+- Remounting the `<video>` on markdown, docs, slug, `isPrimary`, or agent status (THINKING/WORKING). Chat `HeroBubble` must keep the IDLE video.
+- Touching these files for unrelated features (ChatMarkdown, docs, SEO, PWA).
+
+`CharacterStage` on the admin agent page may still preview other states. Public chat and FAB stay on IDLE video.

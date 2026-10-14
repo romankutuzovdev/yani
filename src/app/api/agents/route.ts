@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { error, json, requireAdmin, writeLog } from "@/lib/api";
+import { error, json, requireAdmin, requireCabinet, writeLog } from "@/lib/api";
 import { readDefaultModel } from "@/llm/pricing";
 import { slugify } from "@/lib/utils";
 
@@ -26,10 +26,11 @@ const agentSchema = z.object({
 });
 
 export async function GET() {
-  const admin = await requireAdmin();
-  if (admin instanceof Response) return admin;
+  const cabinet = await requireCabinet();
+  if (cabinet instanceof Response) return cabinet;
 
   const agents = await prisma.agent.findMany({
+    where: cabinet.orgAgentId ? { id: cabinet.orgAgentId } : undefined,
     include: {
       character: { include: { assets: true } },
       skills: { include: { skill: true } },
@@ -38,7 +39,14 @@ export async function GET() {
     },
     orderBy: { updatedAt: "desc" },
   });
-  return json({ agents });
+  if (!cabinet.orgAgentId) return json({ agents });
+  return json({
+    agents: agents.map((agent) => ({
+      ...agent,
+      model: "",
+      skills: agent.skills.map((row) => ({ ...row, skill: { ...row.skill, model: "" } })),
+    })),
+  });
 }
 
 export async function POST(req: NextRequest) {

@@ -9,10 +9,13 @@ import {
   type LLMToolDefinition,
   type Message,
 } from "@/llm";
-import { estimateUsd, readDefaultModel } from "@/llm/pricing";
+import { costUsd, getPricedModels, readDefaultModel, resolvePricedModelId } from "@/llm/pricing";
+import { isModelFailoverError, modelAttempts } from "@/llm/fallback";
 import { ensureToolsRegistered, getTool, getToolsByNames, listTools, type AgentTool } from "@/tools";
 import { registerMemoryTool, formatMemoryForPrompt, getRelevantMemory, writeMemory } from "@/memory";
-import { enqueueMilli } from "@/lib/milliQueue";
+import { runWithChatLimit } from "@/lib/chatPool";
+import { writeLog } from "@/lib/api";
+import { toChatUserMessage } from "@/lib/chatUserError";
 import type { Agent, AgentStatus, Skill } from "@prisma/client";
 
 export interface AgentEngineLimits {
@@ -44,6 +47,8 @@ export interface RunTaskResult {
   result: string;
   iterations: number;
   error?: string;
+  /** Raw provider/engine text for server logs. Not shown to visitors. */
+  detail?: string;
   cancelled?: boolean;
 }
 
@@ -64,9 +69,11 @@ function playbookBlock(agent: Agent): string {
 
 const BUTTON_RULE = [
   "КНОПКИ В ОТВЕТЕ:",
-  "Если промпт навыка говорит предложить кнопку, в самом конце ответа добавь отдельную строку [[кнопка:Подпись|https://полная-ссылка]].",
-  "Подпись и ссылку копируй только из этого промпта. Несколько кнопок — несколько таких строк.",
-  "Не пиши адрес обычным текстом. Если кнопку просить не сказано — не добавляй её.",
+  "Если промпт навыка говорит предложить кнопку, в самом конце ответа добавь отдельную строку и скопируй её целиком, в одну строку, без переноса.",
+  "Новая вкладка: [[кнопка:Подпись|https://полная-ссылка]]",
+  "Попап: [[кнопка:Подпись|https://полная-ссылка|попап]]",
+  "Слово попап ставь только если оно есть в промпте навыка. Подпись и ссылку копируй только оттуда.",
+  "Несколько кнопок — несколько таких строк. Не пиши адрес обычным текстом. Если кнопку просить не сказано — не добавляй её.",
 ].join("\n");
 
 function skillPromptBlock(skill: Skill, chosen: boolean): string {
@@ -173,51 +180,91 @@ export class AgentEngine {
     this.llm = llm ?? createLLMProvider();
   }
 
-  /** Streams one model turn and forwards text tokens as they arrive. */
+  /** Streams one model turn; on upstream outage tries DeepSeek → Gemini 3 Flash → Grok. */
   private async completeTurn(
     messages: Message[],
     options: LLMOptions,
     onDelta: (delta: string) => void,
   ): Promise<LLMResponse> {
-    let content = "";
-    const toolCalls: LLMToolCall[] = [];
-    let usage: LLMResponse["usage"];
-    let model = options.model ?? "";
+    const preferred = options.model?.trim() || readDefaultModel();
+    const attempts = modelAttempts(preferred);
+    let lastError: unknown;
 
-    for await (const chunk of this.llm.stream(messages, options)) {
-      if (chunk.content) {
-        content += chunk.content;
-        onDelta(chunk.content);
-      }
-      if (chunk.toolCalls?.length) toolCalls.push(...chunk.toolCalls);
-      if (chunk.model) model = chunk.model;
-      if (chunk.usage && (chunk.usage.totalTokens || chunk.usage.inputTokens || chunk.usage.outputTokens)) {
-        usage = chunk.usage;
+    for (let i = 0; i < attempts.length; i += 1) {
+      const modelId = attempts[i]!;
+      let content = "";
+      const toolCalls: LLMToolCall[] = [];
+      let usage: LLMResponse["usage"];
+      let model = modelId;
+      let emitted = false;
+
+      try {
+        for await (const chunk of this.llm.stream(messages, { ...options, model: modelId })) {
+          if (chunk.content) {
+            content += chunk.content;
+            emitted = true;
+            onDelta(chunk.content);
+          }
+          if (chunk.toolCalls?.length) {
+            toolCalls.push(...chunk.toolCalls);
+            emitted = true;
+          }
+          if (chunk.model) model = chunk.model;
+          if (chunk.usage && (chunk.usage.totalTokens || chunk.usage.inputTokens || chunk.usage.outputTokens)) {
+            usage = chunk.usage;
+          }
+        }
+
+        if (modelId !== preferred) {
+          const note = `fallback ${preferred} → ${modelId}`;
+          console.error(`[chat] ${note}`);
+          void writeLog({
+            level: "WARN",
+            type: "model_fallback",
+            message: note,
+            meta: { from: preferred, to: modelId },
+          });
+        }
+
+        if (!usage) {
+          const inputTokens = Math.max(
+            1,
+            Math.ceil(messages.reduce((n, m) => n + m.content.length, 0) / 4),
+          );
+          const outputTokens = Math.ceil(
+            (content + toolCalls.map((t) => `${t.name}${t.arguments}`).join("")).length / 4,
+          );
+          usage = { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+        }
+
+        return {
+          content,
+          toolCalls: toolCalls.length ? toolCalls : undefined,
+          usage,
+          model,
+          provider: this.llm.name,
+        };
+      } catch (e) {
+        lastError = e;
+        const message = e instanceof Error ? e.message : String(e);
+        const canRetry =
+          !emitted && i < attempts.length - 1 && isModelFailoverError(message);
+        if (!canRetry) throw e;
+        console.error(`[chat] model ${modelId} failed, next: ${message}`);
+        void writeLog({
+          level: "WARN",
+          type: "model_failover",
+          message: `${modelId}: ${message}`.slice(0, 4000),
+          meta: { from: modelId, next: attempts[i + 1], preferred },
+        });
       }
     }
 
-    if (!usage) {
-      const inputTokens = Math.max(
-        1,
-        Math.ceil(messages.reduce((n, m) => n + m.content.length, 0) / 4),
-      );
-      const outputTokens = Math.ceil(
-        (content + toolCalls.map((t) => `${t.name}${t.arguments}`).join("")).length / 4,
-      );
-      usage = { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
-    }
-
-    return {
-      content,
-      toolCalls: toolCalls.length ? toolCalls : undefined,
-      usage,
-      model,
-      provider: this.llm.name,
-    };
+    throw lastError instanceof Error ? lastError : new Error("All models failed");
   }
 
   run(input: RunTaskInput): Promise<RunTaskResult> {
-    return enqueueMilli(() => this.execute(input));
+    return runWithChatLimit(() => this.execute(input));
   }
 
   private async execute(input: RunTaskInput): Promise<RunTaskResult> {
@@ -368,15 +415,21 @@ export class AgentEngine {
         }, onDelta);
 
         if (response.usage) {
+          const requested = skillModel || agent.model || readDefaultModel();
+          const reported = response.model || requested;
+          const models = await getPricedModels().catch(() => []);
+          const storedModel = models.length
+            ? resolvePricedModelId(reported, models, requested)
+            : reported;
           await prisma.usageRecord.create({
             data: {
               agentId: agent.id,
               provider: response.provider,
-              model: response.model,
+              model: storedModel,
               inputTokens: response.usage.inputTokens,
               outputTokens: response.usage.outputTokens,
               totalTokens: response.usage.totalTokens,
-              estimatedCost: await estimateUsd(response.model || skillModel || agent.model, response.usage),
+              estimatedCost: models.length ? costUsd(reported, response.usage, models, requested) : 0,
               requestType: "agent_run",
             },
           });
@@ -386,6 +439,7 @@ export class AgentEngine {
           messages.push({
             role: "assistant",
             content: response.content || "",
+            toolCalls: response.toolCalls,
           });
 
           for (const call of response.toolCalls) {
@@ -480,9 +534,11 @@ export class AgentEngine {
       };
     } catch (e) {
       const message = e instanceof Error ? e.message : "Ошибка выполнения агента";
-      await setStatus("ERROR", message);
+      const userMessage = toChatUserMessage(message);
+      console.error(`[chat] agent ${agent.id} ${agent.name}: ${message}`);
+      await setStatus("ERROR", userMessage);
       await emit("error", message);
-      return { success: false, result: "", iterations, error: message };
+      return { success: false, result: "", iterations, error: userMessage, detail: message };
     } finally {
       clearTimeout(timeout);
       input.signal?.removeEventListener("abort", onParentAbort);

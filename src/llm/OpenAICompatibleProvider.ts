@@ -79,6 +79,15 @@ export class OpenAICompatibleProvider implements LLMProvider {
         content: m.content,
         ...(m.name ? { name: m.name } : {}),
         ...(m.toolCallId ? { tool_call_id: m.toolCallId } : {}),
+        ...(m.toolCalls?.length
+          ? {
+              tool_calls: m.toolCalls.map((tc) => ({
+                id: tc.id,
+                type: "function" as const,
+                function: { name: tc.name, arguments: tc.arguments },
+              })),
+            }
+          : {}),
       })),
       temperature: options?.temperature ?? 0.7,
       max_tokens: options?.maxTokens ?? 4096,

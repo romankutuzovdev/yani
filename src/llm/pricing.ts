@@ -1,7 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
+import { formatExact, formatUsd } from "@/lib/money";
 import { defaultLLMModel, listLLMModels } from "./index";
 import type { LLMModelInfo, ModelPricing } from "./types";
+
+export { formatUsd };
 
 const SETTINGS_FILE = path.join(process.cwd(), "prisma", "data", "llm-settings.json");
 
@@ -42,8 +45,37 @@ export async function getPricedModels(): Promise<LLMModelInfo[]> {
   return models;
 }
 
-export function costUsd(modelId: string, usage: UsageSlice, models: LLMModelInfo[]): number {
-  const pricing = models.find((m) => m.id === modelId)?.pricing;
+/**
+ * vibecode chat streams report `deepseek-flash`, which is not in /v1/models.
+ * The catalog id the product selects is `deepseek-v4-flash`.
+ * Exact catalog ids always win, so gpt-5.5 and grok stay on their own rates.
+ */
+const UNPRICED_MODEL_ALIASES: Record<string, string> = {
+  "deepseek-flash": "deepseek-v4-flash",
+};
+
+export function resolvePricedModelId(
+  modelId: string,
+  models: LLMModelInfo[],
+  requestedId?: string,
+): string {
+  const reported = modelId.trim();
+  const requested = (requestedId ?? "").trim();
+  const known = (id: string) => id.length > 0 && models.some((m) => m.id === id);
+  if (known(reported)) return reported;
+  if (known(requested)) return requested;
+  const alias = UNPRICED_MODEL_ALIASES[reported] ?? UNPRICED_MODEL_ALIASES[requested];
+  if (alias && known(alias)) return alias;
+  return reported || requested;
+}
+
+export function costUsd(
+  modelId: string,
+  usage: UsageSlice,
+  models: LLMModelInfo[],
+  requestedId?: string,
+): number {
+  const pricing = models.find((m) => m.id === resolvePricedModelId(modelId, models, requestedId))?.pricing;
   if (!pricing) return 0;
   return priceUsage(pricing, usage);
 }
@@ -63,27 +95,23 @@ function priceUsage(pricing: ModelPricing, usage: UsageSlice): number {
   return (fresh / 1_000_000) * inputRate + (cached / 1_000_000) * cacheRate + (usage.outputTokens / 1_000_000) * outputRate;
 }
 
-export async function estimateUsd(modelId: string, usage: UsageSlice): Promise<number> {
+export async function estimateUsd(
+  modelId: string,
+  usage: UsageSlice,
+  requestedId?: string,
+): Promise<number> {
   try {
     const models = await getPricedModels();
-    return costUsd(modelId, usage, models);
+    return costUsd(modelId, usage, models, requestedId);
   } catch {
     return 0;
   }
 }
 
-export function formatUsd(amount: number): string {
-  if (!Number.isFinite(amount) || amount <= 0) return "$0";
-  if (amount < 0.01) return `$${amount.toFixed(4)}`;
-  return `$${amount.toFixed(2)}`;
-}
-
 export function formatPerMillion(pricing?: ModelPricing): string {
   if (!pricing || (pricing.inputUsdPerM === 0 && pricing.outputUsdPerM === 0)) {
-    if (pricing?.usdPerImage) return `$${pricing.usdPerImage.toFixed(3)} / картинка`;
+    if (pricing?.usdPerImage) return `$${formatExact(pricing.usdPerImage)} / картинка`;
     return "";
   }
-  const inn = pricing.inputUsdPerM < 0.01 ? pricing.inputUsdPerM.toFixed(4) : pricing.inputUsdPerM.toFixed(2);
-  const out = pricing.outputUsdPerM < 0.01 ? pricing.outputUsdPerM.toFixed(4) : pricing.outputUsdPerM.toFixed(2);
-  return `$${inn} / $${out} за 1 млн`;
+  return `$${formatExact(pricing.inputUsdPerM)} / $${formatExact(pricing.outputUsdPerM)} за 1 млн`;
 }

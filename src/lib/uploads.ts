@@ -101,6 +101,47 @@ export async function saveUploadedDocument(
   };
 }
 
+/** Text files shown from the public chat menu. */
+export async function saveUploadedTextFile(file: File) {
+  const max = Number(process.env.MAX_UPLOAD_DOC_BYTES ?? 15_728_640);
+  const name = (file.name || "text.txt").split(/[/\\]/).pop() || "text.txt";
+  const lower = name.toLowerCase();
+  const mime = file.type || "";
+  const isTxt = lower.endsWith(".txt") || mime === "text/plain";
+  const isMd = lower.endsWith(".md") || lower.endsWith(".markdown") || mime === "text/markdown";
+  const isPdf = lower.endsWith(".pdf") || mime === "application/pdf";
+  const isDocx =
+    lower.endsWith(".docx") ||
+    mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (!isTxt && !isMd && !isDocx && !isPdf) {
+    throw new Error("Нужен файл TXT, MD, Word (.docx) или PDF");
+  }
+  if (file.size > max) {
+    throw new Error(`Файл больше ${Math.round(max / 1024 / 1024)} МБ`);
+  }
+
+  const ext = isPdf ? "pdf" : isDocx ? "docx" : isMd ? "md" : "txt";
+  const mimeType = isPdf
+    ? "application/pdf"
+    : isDocx
+      ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      : "text/plain";
+  const dir = path.join(process.cwd(), process.env.UPLOAD_DIR ?? "uploads", "documents");
+  await mkdir(dir, { recursive: true });
+  const filename = `${Date.now()}-${randomBytes(6).toString("hex")}.${ext}`;
+  const buffer = Buffer.from(await file.arrayBuffer());
+  await writeFile(path.join(dir, filename), buffer);
+
+  return {
+    filename,
+    originalName: name,
+    mimeType,
+    sizeBytes: file.size,
+    url: `/uploads/documents/${filename}`,
+    buffer,
+  };
+}
+
 export async function saveUploadedMedia(
   file: File,
   folder: "characters" | "logos" | "icons" | "misc" = "characters",
@@ -116,10 +157,10 @@ export async function saveUploadedMedia(
       throw new Error("Video uploads are not allowed here");
     }
     if (!isWebVideoMime(file.type)) {
-      throw new Error("Use web video formats: WebM, MP4 or Ogg");
+      throw new Error("Нужен формат MP4, WebM или Ogg");
     }
     if (file.size > videoMax) {
-      throw new Error(`Video too large (max ${Math.round(videoMax / 1024 / 1024)}MB)`);
+      throw new Error(`Видео больше ${Math.round(videoMax / 1024 / 1024)} МБ`);
     }
   } else {
     if (!IMAGE_MIME.has(file.type)) {

@@ -2,10 +2,9 @@ import { prisma } from "@/lib/db";
 import { agentEngine } from "@/agent/AgentEngine";
 import { writeLog } from "@/lib/api";
 import { asStringArray } from "@/lib/utils";
-import { enqueueMilli } from "@/lib/milliQueue";
 
 export function runTask(taskId: string) {
-  return enqueueMilli(() => runTaskQueued(taskId));
+  return runTaskQueued(taskId);
 }
 
 async function runTaskQueued(taskId: string) {

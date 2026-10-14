@@ -15,12 +15,18 @@ const MIME: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
   ".gif": "image/gif",
+  ".ico": "image/x-icon",
+  ".svg": "image/svg+xml",
   ".webm": "video/webm",
   ".mp4": "video/mp4",
   ".m4v": "video/mp4",
   ".mov": "video/quicktime",
   ".ogv": "video/ogg",
   ".ogg": "video/ogg",
+  ".txt": "text/plain; charset=utf-8",
+  ".md": "text/plain; charset=utf-8",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".pdf": "application/pdf",
 };
 
 function safeParts(parts: string[]) {
@@ -44,10 +50,12 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const ext = path.extname(filePath).toLowerCase();
   const contentType = MIME[ext] ?? "application/octet-stream";
+  const name = safe[safe.length - 1] ?? "";
+  const seoIcon = safe[0] === "site" && name.startsWith("favicon");
   const headers = {
     "Content-Type": contentType,
     "Accept-Ranges": "bytes",
-    "Cache-Control": "public, max-age=86400",
+    "Cache-Control": seoIcon ? "public, max-age=300, must-revalidate" : "public, max-age=86400",
   };
 
   const range = req.headers.get("range");

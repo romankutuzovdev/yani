@@ -7,8 +7,8 @@ import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@yani.by");
-  const [password, setPassword] = useState("admin123456");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -27,7 +27,7 @@ export default function LoginPage() {
       setError(data.error ?? "Ошибка входа");
       return;
     }
-    router.push("/admin");
+    router.push(data.user?.role === "ORG" ? "/org" : "/admin");
     router.refresh();
   }
 
@@ -46,7 +46,7 @@ export default function LoginPage() {
             className="h-12 w-auto object-contain"
             priority
           />
-          <p className="mt-4 text-sm text-slate-500">Вход в админ-панель</p>
+          <p className="mt-4 text-sm text-slate-500">Вход в кабинет</p>
         </div>
         <label className="mt-8 block text-sm text-slate-700">
           Email
@@ -55,6 +55,8 @@ export default function LoginPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             type="email"
+            autoComplete="username"
+            placeholder="Email"
             required
           />
         </label>
@@ -65,6 +67,8 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             type="password"
+            autoComplete="current-password"
+            placeholder="Пароль"
             required
           />
         </label>

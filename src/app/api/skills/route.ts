@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { error, json, requireAdmin, writeLog } from "@/lib/api";
 import { clampSkillText } from "@/lib/docx";
 import { asJsonObject, asStringArray } from "@/lib/utils";
+import { clampPage, readListQuery, wordsWhere } from "@/lib/paging";
 
 const skillSchema = z.object({
   name: z.string().min(1),
@@ -18,13 +19,41 @@ const skillSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
 });
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const admin = await requireAdmin();
   if (admin instanceof Response) return admin;
+  const brief = req.nextUrl.searchParams.get("brief") === "1";
+  const { page, q } = readListQuery(req.nextUrl);
+  const where = wordsWhere(["name", "description"], q);
+  const orderBy = [{ sortOrder: "asc" as const }, { name: "asc" as const }];
+
+  if (brief) {
+    const skills = await prisma.skill.findMany({
+      where,
+      orderBy,
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        iconUrl: true,
+        enabled: true,
+        model: true,
+        documentName: true,
+      },
+    });
+    return json({ skills });
+  }
+
+  const total = await prisma.skill.count({ where });
+  const meta = clampPage(page, total);
   const skills = await prisma.skill.findMany({
-    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    where,
+    orderBy,
+    skip: (meta.page - 1) * meta.pageSize,
+    take: meta.pageSize,
   });
   return json({
+    ...meta,
     skills: skills.map((s) => ({
       ...s,
       tools: asStringArray(s.tools),
@@ -55,18 +84,6 @@ export async function POST(req: NextRequest) {
         config: JSON.stringify(body.config ?? {}),
       },
     });
-    const agents = await prisma.agent.findMany({ select: { id: true } });
-    if (agents.length) {
-      await prisma.agentSkill.createMany({
-        data: agents.map((agent) => ({
-          agentId: agent.id,
-          skillId: skill.id,
-          enabled: true,
-          visible: true,
-          sortOrder: skill.sortOrder,
-        })),
-      });
-    }
     await writeLog({
       type: "skill",
       message: `Created skill ${skill.name}`,

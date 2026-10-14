@@ -31,15 +31,7 @@ function CharacterMedia({
     setSrc(normalizeAssetUrl(asset.url));
   }, [asset.url]);
 
-  useEffect(() => {
-    if (!video) return;
-    const el = videoRef.current;
-    if (!el) return;
-    el.load();
-    void el.play().catch(() => undefined);
-  }, [video, src, state]);
-
-  useKeepVideoPlaying(videoRef, video);
+  useKeepVideoPlaying(videoRef, video, src);
 
   if (video) {
     return (
@@ -56,12 +48,8 @@ function CharacterMedia({
         muted
         playsInline
         preload="auto"
+        webkit-playsinline="true"
         aria-label={`${name} — ${STATE_LABELS[state]}`}
-        onPause={() => {
-          if (document.visibilityState === "visible") {
-            void videoRef.current?.play().catch(() => undefined);
-          }
-        }}
       />
     );
   }

@@ -67,11 +67,13 @@ done <<EOF
 $(ps -u "$(id -u)" -o pid=,args= | awk '/next-server|[n]ode server\.js/ {print}')
 EOF
 
+# Anchor excludes to the site root. A bare "uploads/" also skips
+  # .next/server/app/uploads, so the video route never updates.
 rsync -a --delete \
-  --exclude '.git/' \
-  --exclude '.env' \
-  --exclude 'prisma/data/' \
-  --exclude 'uploads/' \
+  --exclude '/.git/' \
+  --exclude '/.env' \
+  --exclude '/prisma/data/' \
+  --exclude '/uploads/' \
   "$STAGE/" "$APP/"
 
 cp -a "$KEEP/env" "$APP/.env"
@@ -83,6 +85,51 @@ fi
 if [ -d "$KEEP/uploads" ]; then
   rm -rf "$APP/uploads"
   cp -a "$KEEP/uploads" "$APP/uploads"
+fi
+
+# Chat menu documents. Safe to repeat; do not use prisma db push.
+if [ -f "$APP/prisma/data/yani.db" ]; then
+  "$NODE" - "$APP/prisma/data/yani.db" << 'JS'
+const { DatabaseSync } = require("node:sqlite");
+const dbPath = process.argv[1] === "-" ? process.argv[2] : process.argv[1];
+const db = new DatabaseSync(dbPath);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS "AgentDoc" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "agentId" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "fileName" TEXT NOT NULL,
+    "url" TEXT NOT NULL DEFAULT '',
+    "mimeType" TEXT NOT NULL DEFAULT 'text/plain',
+    "openMode" TEXT NOT NULL DEFAULT 'preview',
+    "text" TEXT NOT NULL DEFAULT '',
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL,
+    CONSTRAINT "AgentDoc_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS "AgentDoc_agentId_sortOrder_idx" ON "AgentDoc"("agentId", "sortOrder");
+`);
+function addColumn(sql) {
+  try {
+    db.exec(sql);
+  } catch (err) {
+    if (!/duplicate column/i.test(String(err && err.message || err))) throw err;
+  }
+}
+addColumn('ALTER TABLE "User" ADD COLUMN "planName" TEXT NOT NULL DEFAULT \'\'');
+addColumn('ALTER TABLE "User" ADD COLUMN "planMonthlyPrice" REAL NOT NULL DEFAULT 0');
+addColumn('ALTER TABLE "Agent" ADD COLUMN "isPrimary" INTEGER NOT NULL DEFAULT 0');
+const marked = db.prepare('SELECT COUNT(*) AS n FROM "Agent" WHERE "isPrimary" = 1').get();
+if (!marked || Number(marked.n) === 0) {
+  const pick = db.prepare(
+    'SELECT id FROM "Agent" WHERE slug = ? OR name = ? ORDER BY CASE WHEN slug = ? THEN 0 ELSE 1 END LIMIT 1'
+  ).get('yani', 'Yani', 'yani');
+  if (pick && pick.id) {
+    db.prepare('UPDATE "Agent" SET "isPrimary" = 0').run();
+    db.prepare('UPDATE "Agent" SET "isPrimary" = 1 WHERE id = ?').run(pick.id);
+  }
+}
+JS
 fi
 
 if [ -n "${kill_pids# }" ]; then

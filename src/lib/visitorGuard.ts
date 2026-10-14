@@ -56,8 +56,17 @@ async function activeBlock(ip: string) {
 }
 
 /** Refuse a chat when the IP is blocked or is sending a request every second. */
-export async function guardChatIp(ip: string): Promise<{ ok: true } | { ok: false; message: string }> {
+export async function guardChatIp(
+  ip: string,
+  agentId = "",
+): Promise<{ ok: true } | { ok: false; message: string }> {
   if (!ip) return { ok: true };
+  if (agentId) {
+    const own = await prisma.agentIpBlock.findUnique({
+      where: { agentId_ip: { agentId, ip } },
+    });
+    if (own) return { ok: false, message: "Доступ с этого IP закрыт." };
+  }
   const block = await activeBlock(ip);
   if (block) {
     const until = block.blockedUntil

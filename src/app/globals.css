@@ -5,6 +5,8 @@
   --foreground: #0f172a;
   /* Yani logo lavender */
   --yani: #d8c6fb;
+  --yani-btn: #f3ebfe;
+  --yani-btn-hover: #e6dbfd;
   --yani-deep: #8b6fd4;
   --yani-mid: #a78bfa;
   --yani-soft: #f3eefc;
@@ -14,6 +16,8 @@
 
 @theme inline {
   --color-yani: var(--yani);
+  --color-yani-btn: var(--yani-btn);
+  --color-yani-btn-hover: var(--yani-btn-hover);
   --color-yani-deep: var(--yani-deep);
   --color-yani-mid: var(--yani-mid);
   --color-yani-soft: var(--yani-soft);
@@ -34,4 +38,13 @@ body {
 a {
   color: inherit;
   text-decoration: none;
+}
+
+/* Empty chat field: hide the Android caret until the field is tapped. */
+textarea.chat-input:not(:focus-within) {
+  caret-color: transparent;
+}
+
+textarea.chat-input:focus-within {
+  caret-color: #1e293b;
 }

@@ -2,14 +2,18 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { AgentChatLink } from "@/components/AgentChatLink";
+import { PagedRows } from "@/components/PagedRows";
 
 type Agent = {
   id: string;
   name: string;
+  slug: string;
   description: string;
   logoUrl?: string;
   status: string;
+  isPrimary?: boolean;
   model: string;
   _count: { tasks: number; memories: number };
 };
@@ -27,6 +31,8 @@ const STATUS_RU: Record<string, string> = {
 
 export default function AgentsPage() {
   const router = useRouter();
+  const orgMode = usePathname().startsWith("/org");
+  const agentBase = orgMode ? "/org/agents" : "/admin/agents";
   const [agents, setAgents] = useState<Agent[]>([]);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -43,6 +49,7 @@ export default function AgentsPage() {
 
   useEffect(() => {
     void load();
+    if (orgMode) return;
     void fetch("/api/llm/usage")
       .then((r) => r.json())
       .then((data) => {
@@ -63,7 +70,7 @@ export default function AgentsPage() {
       setNotice(data.error ?? "Не удалось скопировать");
       return;
     }
-    router.push(`/admin/agents/${data.agent.id}`);
+    router.push(`${agentBase}/${data.agent.id}`);
   }
 
   async function deleteAgent(id: string) {
@@ -98,8 +105,11 @@ export default function AgentsPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold text-slate-900">Агенты</h1>
-          <p className="mt-1 text-slate-500">Создавайте и настраивайте AI-агентов с персонажем</p>
+          <p className="mt-1 text-slate-500">
+            {orgMode ? "Ваш агент" : "Создавайте и настраивайте AI-агентов с персонажем"}
+          </p>
         </div>
+        {!orgMode && (
         <div className="flex gap-2">
           <input
             value={name}
@@ -115,17 +125,20 @@ export default function AgentsPage() {
             Создать
           </button>
         </div>
+        )}
       </div>
 
       {notice && <p className="text-sm text-red-600">{notice}</p>}
 
+      <PagedRows items={agents} text={(agent) => `${agent.name} ${agent.description}`} placeholder="Поиск по агентам">
+        {(rows) => (
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {agents.map((agent) => (
+        {rows.map((agent) => (
           <article
             key={agent.id}
             className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm"
           >
-            <Link href={`/admin/agents/${agent.id}`} className="block transition hover:opacity-90">
+            <Link href={`${agentBase}/${agent.id}`} className="block transition hover:opacity-90">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 {agent.logoUrl ? (
@@ -141,6 +154,11 @@ export default function AgentsPage() {
                   </div>
                 )}
                 <h2 className="text-xl font-medium text-slate-900">{agent.name}</h2>
+                {agent.isPrimary ? (
+                  <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium normal-case text-violet-700">
+                    Главный
+                  </span>
+                ) : null}
               </div>
               <span className="text-xs uppercase text-slate-500">
                 {STATUS_RU[agent.status] ?? agent.status}
@@ -150,12 +168,18 @@ export default function AgentsPage() {
               {agent.description || "Без описания"}
             </p>
             <div className="mt-4 flex gap-4 text-xs text-slate-500">
-              <span>{agent.model}</span>
-              <span>{spent[agent.id] ?? "$0"}</span>
+              {!orgMode && <span>{agent.model}</span>}
+              {!orgMode && <span>{spent[agent.id] ?? "$0"}</span>}
               <span>{agent._count.tasks} задач</span>
               <span>{agent._count.memories} память</span>
             </div>
             </Link>
+            {agent.slug ? (
+              <div className="mt-3">
+                <AgentChatLink slug={agent.slug} />
+              </div>
+            ) : null}
+            {!orgMode && (
             <div className="mt-4 flex items-center gap-3 border-t border-violet-50 pt-3 text-sm">
               {confirmId === agent.id ? (
                 <>
@@ -198,9 +222,12 @@ export default function AgentsPage() {
                 </>
               )}
             </div>
+            )}
           </article>
         ))}
       </div>
+        )}
+      </PagedRows>
     </div>
   );
 }

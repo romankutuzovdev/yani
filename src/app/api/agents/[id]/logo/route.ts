@@ -6,9 +6,9 @@ import { saveUploadedImage } from "@/lib/uploads";
 type Params = { params: Promise<{ id: string }> };
 
 export async function POST(req: NextRequest, { params }: Params) {
-  const admin = await requireAdmin();
-  if (admin instanceof Response) return admin;
   const { id } = await params;
+  const staff = await requireAdmin();
+  if (staff instanceof Response) return staff;
 
   const agent = await prisma.agent.findUnique({ where: { id } });
   if (!agent) return error("Agent not found", 404);
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       type: "agent",
       message: `Uploaded logo for ${agent.name}`,
       agentId: id,
-      userId: admin.id,
+      userId: staff.id,
     });
     return json({ logoUrl: updated.logoUrl });
   } catch (e) {

@@ -1,9 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
+import { AgentChatLink } from "@/components/AgentChatLink";
+import { AgentDocs } from "@/components/AgentDocs";
+import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { hideOpenButtonToken, splitReplyButtons } from "@/lib/replyButtons";
 import { CharacterStage } from "@/components/CharacterStage";
 import { ModelSelect } from "@/components/ModelSelect";
+import { bindHeroVideo } from "@/lib/useKeepVideoPlaying";
+import { PagedRows } from "@/components/PagedRows";
+import { copyText } from "@/lib/copyText";
+import { CHAT_UNAVAILABLE, toChatUserMessage } from "@/lib/chatUserError";
 import {
   ALL_CHARACTER_STATES,
   STATE_LABELS,
@@ -37,9 +45,12 @@ type AgentSkillRow = {
 type AgentDetail = {
   id: string;
   name: string;
+  slug: string;
   description: string;
   logoUrl: string;
+  homeIconUrl: string;
   greeting: string;
+  asideText: string;
   personality: string;
   role: string;
   communicationStyle: string;
@@ -53,6 +64,12 @@ type AgentDetail = {
   monthlyRequestLimit: number;
   requestsToday?: number;
   requestsMonth?: number;
+  orgEmail?: string;
+  orgName?: string;
+  orgUnp?: string;
+  planName?: string;
+  planMonthlyPrice?: number;
+  isPrimary?: boolean;
   temperature: number;
   maxIterations: number;
   status: string;
@@ -66,6 +83,8 @@ const STATES = ALL_CHARACTER_STATES;
 
 export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
+  const pathname = usePathname();
+  const orgMode = pathname.startsWith("/org");
   const router = useRouter();
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const [skills, setSkills] = useState<SkillItem[]>([]);
@@ -76,12 +95,28 @@ export default function AgentDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [acting, setActing] = useState(false);
   const [previewState, setPreviewState] = useState<CharacterState | null>(null);
+  const [mediaUpload, setMediaUpload] = useState<{ state: string; progress: number } | null>(null);
   const [spentLabel, setSpentLabel] = useState("");
+  const [orgEmail, setOrgEmail] = useState("");
+  const [orgName, setOrgName] = useState("");
+  const [orgUnp, setOrgUnp] = useState("");
+  const [planName, setPlanName] = useState("");
+  const [planPrice, setPlanPrice] = useState("");
+  const [orgPassword, setOrgPassword] = useState("");
+  const [orgBusy, setOrgBusy] = useState(false);
+  const [copiedAccess, setCopiedAccess] = useState<"email" | "password" | "both" | "">("");
+  const [widgetCfg, setWidgetCfg] = useState({
+    position: "bottom-right" as "bottom-right" | "bottom-left",
+    size: 68,
+    offsetBottom: 2,
+    offsetSide: 2,
+  });
+  const [widgetBusy, setWidgetBusy] = useState(false);
 
   async function load() {
     const [a, s] = await Promise.all([
       fetch(`/api/agents/${params.id}`).then((r) => r.json()),
-      fetch("/api/skills").then((r) => r.json()),
+      fetch(orgMode ? "/api/org/skills?brief=1" : "/api/skills?brief=1").then((r) => r.json()),
     ]);
     const raw = a.agent as AgentDetail & {
       skills: Array<{
@@ -103,16 +138,39 @@ export default function AgentDetailPage() {
         }))
         .sort((x, y) => x.sortOrder - y.sortOrder);
       raw.logoUrl = raw.logoUrl ?? "";
+      raw.homeIconUrl = raw.homeIconUrl ?? "";
       raw.greeting = raw.greeting ?? "";
+      raw.asideText = raw.asideText ?? "";
     }
     setAgent(raw);
+    setOrgEmail(raw?.orgEmail ?? "");
+    void fetch(`/api/agents/${params.id}/widget`)
+      .then((r) => r.json())
+      .then((data) => {
+        const c = data.widget?.config ?? {};
+        setWidgetCfg({
+          position: c.position === "bottom-left" ? "bottom-left" : "bottom-right",
+          size: Math.min(140, Math.max(44, Number(c.size) || 68)),
+          offsetBottom: Math.min(40, Math.max(0, Number(c.offsetBottom) ?? 2)),
+          offsetSide: Math.min(40, Math.max(0, Number(c.offsetSide) ?? 2)),
+        });
+      })
+      .catch(() => undefined);
+    setOrgName(raw?.orgName ?? "");
+    setOrgUnp(raw?.orgUnp ?? "");
+    setPlanName(raw?.planName ?? "");
+    setPlanPrice(raw?.planMonthlyPrice ? String(raw.planMonthlyPrice) : "");
     setSkills(s.skills ?? []);
-    try {
-      const usage = await fetch(`/api/llm/usage?agentId=${params.id}`).then((r) => r.json());
-      const row = (usage.byAgent ?? []).find((a: { agentId: string }) => a.agentId === params.id);
-      setSpentLabel(row?.costLabel ?? "$0");
-    } catch {
+    if (orgMode) {
       setSpentLabel("");
+    } else {
+      try {
+        const usage = await fetch(`/api/llm/usage?agentId=${params.id}`).then((r) => r.json());
+        const row = (usage.byAgent ?? []).find((a: { agentId: string }) => a.agentId === params.id);
+        setSpentLabel(row?.costLabel ?? "$0");
+      } catch {
+        setSpentLabel("");
+      }
     }
   }
 
@@ -128,7 +186,6 @@ export default function AgentDetailPage() {
                 ...prev,
                 status: data.status,
                 statusMessage: data.statusMessage,
-                character: data.character ?? prev.character,
               }
             : prev,
         );
@@ -148,8 +205,8 @@ export default function AgentDetailPage() {
       body: JSON.stringify({
         name: agent.name,
         description: agent.description,
-        logoUrl: agent.logoUrl,
         greeting: agent.greeting,
+        asideText: agent.asideText,
         personality: agent.personality,
         role: agent.role,
         communicationStyle: agent.communicationStyle,
@@ -158,9 +215,15 @@ export default function AgentDetailPage() {
         restrictions: agent.restrictions,
         additionalInstructions: agent.additionalInstructions,
         systemPrompt: agent.systemPrompt,
-        model: agent.model,
-        dailyRequestLimit: agent.dailyRequestLimit ?? 0,
-        monthlyRequestLimit: agent.monthlyRequestLimit ?? 0,
+        ...(orgMode
+          ? {}
+          : {
+              logoUrl: agent.logoUrl,
+              model: agent.model,
+              dailyRequestLimit: agent.dailyRequestLimit ?? 0,
+              monthlyRequestLimit: agent.monthlyRequestLimit ?? 0,
+              isPrimary: Boolean(agent.isPrimary),
+            }),
         temperature: agent.temperature,
         maxIterations: agent.maxIterations,
         skillAssignments: agent.skills.map((s, i) => ({
@@ -204,6 +267,107 @@ export default function AgentDetailPage() {
     router.push("/admin/agents");
   }
 
+  async function generateAccess() {
+    if (!agent || orgBusy) return;
+    setOrgBusy(true);
+    setMessage("");
+    const res = await fetch(`/api/agents/${agent.id}/access`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        orgName,
+        orgUnp,
+        planName,
+        planMonthlyPrice: Math.max(0, Number(planPrice) || 0),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setOrgBusy(false);
+    if (!res.ok || !data.email || !data.password) {
+      setMessage(data.error ?? "Не удалось выдать доступ");
+      return;
+    }
+    setOrgEmail(data.email);
+    setOrgName(data.orgName ?? orgName);
+    setOrgUnp(data.orgUnp ?? orgUnp);
+    setPlanName(data.planName ?? planName);
+    if (data.planMonthlyPrice != null) setPlanPrice(data.planMonthlyPrice ? String(data.planMonthlyPrice) : "");
+    setOrgPassword(data.password);
+    setMessage("Доступ готов. Скопируйте почту и пароль — пароль больше не покажется.");
+  }
+
+  async function saveOrgProfile() {
+    if (!agent || orgBusy) return;
+    setOrgBusy(true);
+    setMessage("");
+    const res = await fetch(`/api/agents/${agent.id}/access`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        orgName,
+        orgUnp,
+        planName,
+        planMonthlyPrice: Math.max(0, Number(planPrice) || 0),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setOrgBusy(false);
+    if (!res.ok) {
+      setMessage(data.error ?? "Не удалось сохранить организацию");
+      return;
+    }
+    setOrgName(data.orgName ?? orgName);
+    setOrgUnp(data.orgUnp ?? orgUnp);
+    setPlanName(data.planName ?? planName);
+    if (data.planMonthlyPrice != null) setPlanPrice(data.planMonthlyPrice ? String(data.planMonthlyPrice) : "");
+    setMessage("Данные организации сохранены");
+  }
+
+  async function copyAccess(value: string, what: "email" | "password" | "both") {
+    const ok = await copyText(value);
+    setCopiedAccess(ok ? what : "");
+    setMessage(ok ? "Скопировано" : "Не удалось скопировать — выделите текст вручную");
+    if (ok) window.setTimeout(() => setCopiedAccess(""), 1600);
+  }
+
+  async function saveWidget() {
+    if (!agent || widgetBusy) return;
+    setWidgetBusy(true);
+    setMessage("");
+    const res = await fetch(`/api/agents/${agent.id}/widget`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(widgetCfg),
+    });
+    const data = await res.json().catch(() => ({}));
+    setWidgetBusy(false);
+    if (!res.ok) {
+      setMessage(data.error ?? "Не удалось сохранить виджет");
+      return;
+    }
+    const c = data.widget?.config ?? widgetCfg;
+    setWidgetCfg({
+      position: c.position === "bottom-left" ? "bottom-left" : "bottom-right",
+      size: Math.min(140, Math.max(44, Number(c.size) || 68)),
+      offsetBottom: Math.min(40, Math.max(0, Number(c.offsetBottom) ?? 2)),
+      offsetSide: Math.min(40, Math.max(0, Number(c.offsetSide) ?? 2)),
+    });
+    setMessage("Настройки виджета сохранены");
+  }
+
+  async function uploadHomeIcon(file: File) {
+    const form = new FormData();
+    form.set("file", file);
+    const res = await fetch(`/api/agents/${params.id}/home-icon`, { method: "POST", body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setMessage(data.error ?? "Не удалось сохранить иконку");
+      return;
+    }
+    setMessage("Иконка для экрана сохранена");
+    await load();
+  }
+
   async function uploadLogo(file: File) {
     const form = new FormData();
     form.set("file", file);
@@ -211,12 +375,39 @@ export default function AgentDetailPage() {
     await load();
   }
 
-  async function upload(state: string, file: File) {
+  function upload(state: string, file: File) {
     const form = new FormData();
     form.set("state", state);
     form.set("file", file);
-    await fetch(`/api/agents/${params.id}/character`, { method: "POST", body: form });
-    await load();
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/agents/${params.id}/character`);
+    setMediaUpload({ state, progress: 0 });
+    setMessage("");
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      const progress = Math.min(100, Math.round((event.loaded / event.total) * 100));
+      setMediaUpload({ state, progress });
+    };
+    xhr.onload = () => {
+      setMediaUpload(null);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        setMessage(file.type.startsWith("video/") ? "Видео загружено" : "Файл загружен");
+        void load();
+        return;
+      }
+      let reason = "Не удалось загрузить";
+      try {
+        reason = (JSON.parse(xhr.responseText) as { error?: string }).error || reason;
+      } catch {
+        /* keep fallback */
+      }
+      setMessage(reason);
+    };
+    xhr.onerror = () => {
+      setMediaUpload(null);
+      setMessage("Не удалось загрузить файл");
+    };
+    xhr.send(form);
   }
 
   async function sendChat() {
@@ -232,7 +423,10 @@ export default function AgentDetailPage() {
     const data = await res.json();
     setChatLog((prev) => [
       ...prev,
-      { role: "assistant", content: data.reply ?? data.error ?? "Нет ответа" },
+      {
+        role: "assistant",
+        content: toChatUserMessage(data.reply ?? data.error ?? CHAT_UNAVAILABLE),
+      },
     ]);
   }
 
@@ -246,9 +440,30 @@ export default function AgentDetailPage() {
         <div>
           <h1 className="text-3xl font-semibold">{agent.name}</h1>
           <p className="text-slate-500">Лого, hero, приветствие, промпт и навыки</p>
+          {agent.slug ? (
+            <div className="mt-2">
+              <AgentChatLink slug={agent.slug} />
+            </div>
+          ) : null}
+          {!orgMode ? (
+            <label className="mt-3 flex items-start gap-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={Boolean(agent.isPrimary)}
+                onChange={(e) => setAgent({ ...agent, isPrimary: e.target.checked })}
+              />
+              <span>
+                <span className="font-medium">Главный агент</span>
+                <span className="mt-0.5 block text-slate-500">
+                  Открывается с yani.by. Сохраняется кнопкой «Сохранить».
+                </span>
+              </span>
+            </label>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {confirmDelete ? (
+          {!orgMode && confirmDelete ? (
             <>
               <span className="text-sm text-slate-500">Удалить агента?</span>
               <button
@@ -269,22 +484,26 @@ export default function AgentDetailPage() {
             </>
           ) : (
             <>
-              <button
-                type="button"
-                disabled={acting}
-                onClick={() => void copyAgent()}
-                className="rounded-xl border border-violet-200 px-4 py-2.5 text-sm font-medium text-violet-800 hover:bg-violet-50 disabled:opacity-60"
-              >
-                Копировать
-              </button>
-              <button
-                type="button"
-                disabled={acting}
-                onClick={() => setConfirmDelete(true)}
-                className="rounded-xl px-3 py-2.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-60"
-              >
-                Удалить
-              </button>
+              {!orgMode && (
+                <button
+                  type="button"
+                  disabled={acting}
+                  onClick={() => void copyAgent()}
+                  className="rounded-xl border border-violet-200 px-4 py-2.5 text-sm font-medium text-violet-800 hover:bg-violet-50 disabled:opacity-60"
+                >
+                  Копировать
+                </button>
+              )}
+              {!orgMode && (
+                <button
+                  type="button"
+                  disabled={acting}
+                  onClick={() => setConfirmDelete(true)}
+                  className="rounded-xl px-3 py-2.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-60"
+                >
+                  Удалить
+                </button>
+              )}
               <button
                 onClick={save}
                 disabled={saving}
@@ -298,24 +517,155 @@ export default function AgentDetailPage() {
       </div>
       {message && <p className="text-sm text-violet-600">{message}</p>}
 
-      <section className="grid gap-4 rounded-2xl border border-violet-100 bg-white p-5 shadow-sm md:grid-cols-[140px_1fr]">
-        <label className="flex h-32 w-32 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed border-violet-200 bg-violet-50 text-center text-xs text-violet-600 hover:border-violet-400">
-          {agent.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={agent.logoUrl} alt="logo" className="h-full w-full object-contain p-2" />
-          ) : (
-            <span>Логотип</span>
-          )}
+      {!orgMode && <AgentDocs agentId={agent.id} slug={agent.slug} />}
+
+      {!orgMode && (
+      <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-semibold">Доступ организации</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Организация получит тот же кабинет, что админка, только для этого агента: без аналитики, ключей и чужих агентов.
+        </p>
+        <label className="mt-4 block text-sm text-slate-700">
+          Название организации
           <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void uploadLogo(file);
-            }}
+            value={orgName}
+            onChange={(e) => setOrgName(e.target.value)}
+            className="mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
           />
         </label>
+        <label className="mt-3 block text-sm text-slate-700">
+          УНП
+          <input
+            value={orgUnp}
+            onChange={(e) => setOrgUnp(e.target.value)}
+            className="mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
+          />
+        </label>
+        <label className="mt-3 block text-sm text-slate-700">
+          Название тарифа
+          <input
+            value={planName}
+            onChange={(e) => setPlanName(e.target.value)}
+            placeholder="Как называется тариф сейчас"
+            className="mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
+          />
+        </label>
+        <label className="mt-3 block text-sm text-slate-700">
+          Цена в месяц
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            inputMode="decimal"
+            value={planPrice}
+            onChange={(e) => setPlanPrice(e.target.value)}
+            placeholder="0"
+            className="mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
+          />
+        </label>
+        {orgEmail ? (
+          <p className="mt-3 text-sm text-slate-700">
+            Почта: <span className="font-medium">{orgEmail}</span>
+          </p>
+        ) : null}
+        <button
+          type="button"
+          disabled={orgBusy}
+          onClick={() => void generateAccess()}
+          className="mt-4 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60"
+        >
+          {orgBusy ? "Готовим…" : orgEmail ? "Новый пароль" : "Сгенерировать доступ"}
+        </button>
+        {orgEmail ? (
+          <button
+            type="button"
+            disabled={orgBusy}
+            onClick={() => void saveOrgProfile()}
+            className="ml-2 mt-4 rounded-xl border border-violet-200 px-4 py-2.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-60"
+          >
+            Сохранить организацию
+          </button>
+        ) : null}
+        {orgPassword ? (
+          <div className="mt-4 space-y-2 rounded-xl bg-violet-50 p-3 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                Почта: <span className="font-medium">{orgEmail}</span>
+              </span>
+              <button
+                type="button"
+                className="rounded-lg border border-violet-200 bg-white px-2.5 py-1 text-xs font-medium text-violet-800 hover:bg-violet-50"
+                onClick={() => void copyAccess(orgEmail, "email")}
+              >
+                {copiedAccess === "email" ? "Скопировано" : "Копировать"}
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                Пароль: <span className="font-medium">{orgPassword}</span>
+              </span>
+              <button
+                type="button"
+                className="rounded-lg border border-violet-200 bg-white px-2.5 py-1 text-xs font-medium text-violet-800 hover:bg-violet-50"
+                onClick={() => void copyAccess(orgPassword, "password")}
+              >
+                {copiedAccess === "password" ? "Скопировано" : "Копировать"}
+              </button>
+            </div>
+            <button
+              type="button"
+              className="rounded-lg border border-violet-200 bg-white px-2.5 py-1 text-xs font-medium text-violet-800 hover:bg-violet-50"
+              onClick={() => void copyAccess(`${orgEmail}\n${orgPassword}`, "both")}
+            >
+              {copiedAccess === "both" ? "Скопировано" : "Копировать почту и пароль"}
+            </button>
+          </div>
+        ) : null}
+      </section>
+      )}
+
+      <section className="grid gap-4 rounded-2xl border border-violet-100 bg-white p-5 shadow-sm md:grid-cols-[140px_1fr]">
+        <div className="flex flex-col gap-3">
+          {!orgMode ? (
+            <label className="flex h-32 w-32 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed border-violet-200 bg-violet-50 text-center text-xs text-violet-600 hover:border-violet-400">
+              {agent.logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={agent.logoUrl} alt="logo" className="h-full w-full object-contain p-2" />
+              ) : (
+                <span>Логотип</span>
+              )}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void uploadLogo(file);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          ) : null}
+          <label className="flex h-32 w-32 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed border-violet-200 bg-violet-50 text-center text-xs text-violet-600 hover:border-violet-400">
+            {agent.homeIconUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={agent.homeIconUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <span className="px-2">Иконка на экран</span>
+            )}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void uploadHomeIcon(file);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <p className="w-32 text-center text-[11px] leading-snug text-slate-500">На экран телефона. Своя у каждого агента.</p>
+        </div>
         <div className="space-y-3">
           <label className="block text-sm text-slate-700">
             Название
@@ -342,6 +692,15 @@ export default function AgentDetailPage() {
               onChange={(e) => setAgent({ ...agent, description: e.target.value })}
             />
           </label>
+          <label className="block text-sm text-slate-700">
+            Текст рядом с агентом
+            <textarea
+              className="mt-1 min-h-16 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
+              value={agent.asideText}
+              onChange={(e) => setAgent({ ...agent, asideText: e.target.value })}
+              placeholder="Например: ИИ-агент 24/7. Видно рядом с героем в чате и у кнопки виджета."
+            />
+          </label>
         </div>
       </section>
 
@@ -360,6 +719,7 @@ export default function AgentDetailPage() {
         <p className="mt-2 text-xs text-slate-500">Сохраняется вместе с кнопкой «Сохранить» внизу страницы.</p>
       </section>
 
+      {!orgMode && (
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="font-medium text-slate-900">Модель этого агента</h2>
         <p className="mt-1 text-sm text-slate-500">
@@ -374,7 +734,9 @@ export default function AgentDetailPage() {
         </div>
         <p className="mt-2 text-xs text-slate-500">Сохраняется вместе с кнопкой «Сохранить» внизу страницы.</p>
       </section>
+      )}
 
+      {!orgMode && (
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="font-medium text-slate-900">Лимит запросов</h2>
         <p className="mt-1 text-sm text-slate-500">
@@ -420,7 +782,9 @@ export default function AgentDetailPage() {
         </div>
         <p className="mt-2 text-xs text-slate-500">Сохраняется вместе с кнопкой «Сохранить» внизу страницы.</p>
       </section>
+      )}
 
+      {!orgMode && (
       <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
         <CharacterStage
           name={agent.name}
@@ -478,11 +842,15 @@ export default function AgentDetailPage() {
                       {asset ? (
                         isVideo ? (
                           <video
+                            ref={(node) => {
+                              if (!node) return;
+                              return bindHeroVideo(node);
+                            }}
                             src={normalizeAssetUrl(asset.url)}
                             className="mx-auto mt-2 h-24 w-24 rounded-xl object-contain"
-                            muted
-                            loop
                             autoPlay
+                            loop
+                            muted
                             playsInline
                           />
                         ) : (
@@ -498,18 +866,27 @@ export default function AgentDetailPage() {
                       )}
                     </button>
                     <label className="mt-2 inline-block cursor-pointer text-[11px] text-violet-600/70 hover:text-violet-700">
-                      Загрузить
+                      {mediaUpload?.state === state ? `Загрузка ${mediaUpload.progress}%` : "Загрузить"}
                       <input
                         type="file"
                         accept="image/png,image/jpeg,image/webp,image/gif,video/webm,video/mp4,video/ogg"
                         className="hidden"
+                        disabled={mediaUpload !== null}
                         onChange={(e) => {
                           const file = e.target.files?.[0];
-                          if (file) void upload(state, file);
+                          if (file) upload(state, file);
                           e.target.value = "";
                         }}
                       />
                     </label>
+                    {mediaUpload?.state === state && (
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-violet-100">
+                        <div
+                          className="h-full rounded-full bg-yani-deep transition-[width] duration-150"
+                          style={{ width: `${mediaUpload.progress}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -518,14 +895,21 @@ export default function AgentDetailPage() {
 
         </div>
       </div>
+      )}
 
       <section className="rounded-2xl border border-violet-100 bg-white shadow-sm p-5">
           <h2 className="mb-3 font-medium">Назначенные навыки</h2>
           <p className="mb-4 text-xs text-slate-500">
             Включите навык, настройте видимость на пользовательском экране и порядок плиток.
           </p>
+          <PagedRows
+            items={skills}
+            text={(skill) => `${skill.name} ${skill.description ?? ""}`}
+            placeholder="Поиск по навыкам"
+          >
+            {(rows) => (
           <div className="space-y-2">
-            {skills.map((skill) => {
+            {rows.map((skill) => {
               const assigned = agent.skills.find((s) => s.skillId === skill.id);
               const checked = Boolean(assigned);
               return (
@@ -619,12 +1003,19 @@ export default function AgentDetailPage() {
               );
             })}
           </div>
+            )}
+          </PagedRows>
         </section>
 
       <section className="rounded-2xl border border-violet-100 bg-white shadow-sm p-5">
         <h2 className="mb-3 font-medium">Чат с агентом</h2>
         <div className="mb-3 max-h-72 space-y-2 overflow-y-auto rounded-xl bg-violet-50/50 p-4">
-          {chatLog.map((m, i) => (
+          {chatLog.map((m, i) => {
+            const parsed =
+              m.role === "assistant"
+                ? splitReplyButtons(hideOpenButtonToken(m.content))
+                : { text: m.content, buttons: [] };
+            return (
             <div
               key={i}
               className={`rounded-lg px-3 py-2 text-sm ${
@@ -632,9 +1023,30 @@ export default function AgentDetailPage() {
               }`}
             >
               <span className="mr-2 text-xs uppercase text-slate-500">{m.role}</span>
-              {m.content}
+              {parsed.text ? (
+                <ChatMarkdown
+                  text={parsed.text}
+                  variant={m.role === "user" ? "user" : "assistant"}
+                />
+              ) : null}
+              {parsed.buttons.length ? (
+                <div className="mt-2 flex flex-col gap-1">
+                  {parsed.buttons.map((button) => (
+                    <a
+                      key={button.label + button.href}
+                      href={button.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-lg bg-violet-200 px-2 py-1 text-center text-xs font-medium text-slate-900"
+                    >
+                      {button.label}
+                    </a>
+                  ))}
+                </div>
+              ) : null}
             </div>
-          ))}
+            );
+          })}
           {!chatLog.length && <p className="text-sm text-slate-500">Начните диалог</p>}
         </div>
         <div className="flex gap-2">
@@ -652,10 +1064,84 @@ export default function AgentDetailPage() {
             Отправить
           </button>
         </div>
-        <p className="mt-3 text-xs text-slate-500">
+        <p className="mt-3 break-all text-xs text-slate-500">
           Виджет:{" "}
-          <code className="rounded bg-black/40 px-1">{`<script src="${typeof window !== "undefined" ? window.location.origin : ""}/widget.js" data-agent-id="${agent.id}"></script>`}</code>
+          <code className="rounded bg-violet-50 px-1">{`<script src="${typeof window !== "undefined" ? window.location.origin : ""}/widget.js" data-agent-id="${agent.id}"></script>`}</code>
         </p>
+        <p className="mt-2 break-all text-xs text-slate-500">
+          Фрейм — тот же чат, что на сайте: герой и лавандовое оформление.{" "}
+          <code className="rounded bg-violet-50 px-1">{`<iframe src="${typeof window !== "undefined" ? window.location.origin : ""}/chat?slug=${encodeURIComponent(agent.slug)}" title="Чат" style="width:100%;height:720px;border:0"></iframe>`}</code>
+        </p>
+      </section>
+
+      <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
+        <h2 className="font-medium text-slate-900">Настройки виджета</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Текст рядом с кнопкой берётся из поля «Текст рядом с агентом» выше (сохраните агента). Здесь —
+          размер кнопки и сдвиг: выше = больше «Отступ снизу», левее = больше «Отступ сбоку» при позиции справа.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="block text-sm text-slate-700">
+            Позиция
+            <select
+              className="mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
+              value={widgetCfg.position}
+              onChange={(e) =>
+                setWidgetCfg({
+                  ...widgetCfg,
+                  position: e.target.value === "bottom-left" ? "bottom-left" : "bottom-right",
+                })
+              }
+            >
+              <option value="bottom-right">Справа внизу</option>
+              <option value="bottom-left">Слева внизу</option>
+            </select>
+          </label>
+          <label className="block text-sm text-slate-700">
+            Диаметр кнопки, px ({widgetCfg.size})
+            <input
+              type="range"
+              min={44}
+              max={140}
+              step={2}
+              value={widgetCfg.size}
+              onChange={(e) => setWidgetCfg({ ...widgetCfg, size: Number(e.target.value) })}
+              className="mt-3 w-full"
+            />
+          </label>
+          <label className="block text-sm text-slate-700">
+            Отступ снизу, % высоты ({widgetCfg.offsetBottom}) — выше на экране
+            <input
+              type="range"
+              min={0}
+              max={40}
+              step={1}
+              value={widgetCfg.offsetBottom}
+              onChange={(e) => setWidgetCfg({ ...widgetCfg, offsetBottom: Number(e.target.value) })}
+              className="mt-3 w-full"
+            />
+          </label>
+          <label className="block text-sm text-slate-700">
+            Отступ сбоку, % ({widgetCfg.offsetSide}) — дальше от края к центру / левее справа
+            <input
+              type="range"
+              min={0}
+              max={40}
+              step={1}
+              value={widgetCfg.offsetSide}
+              onChange={(e) => setWidgetCfg({ ...widgetCfg, offsetSide: Number(e.target.value) })}
+              className="mt-3 w-full"
+            />
+          </label>
+        </div>
+        <button
+          type="button"
+          disabled={widgetBusy}
+          onClick={() => void saveWidget()}
+          className="mt-4 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60"
+        >
+          {widgetBusy ? "Сохранение…" : "Сохранить виджет"}
+        </button>
       </section>
     </div>
   );

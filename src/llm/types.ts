@@ -5,6 +5,8 @@ export interface Message {
   content: string;
   name?: string;
   toolCallId?: string;
+  /** Required on assistant turns that requested tools (OpenAI-compatible). */
+  toolCalls?: LLMToolCall[];
 }
 
 export interface LLMOptions {

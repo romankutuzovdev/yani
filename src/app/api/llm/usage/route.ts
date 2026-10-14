@@ -1,29 +1,23 @@
 import { prisma } from "@/lib/db";
-import { error, json, requireAdmin } from "@/lib/api";
-import { costUsd, formatUsd, getPricedModels } from "@/llm/pricing";
+import { json, requireAdmin } from "@/lib/api";
+import { formatUsd, getPricedModels } from "@/llm/pricing";
 import type { LLMModelInfo } from "@/llm";
+import { minskDayKey, parseUsageBucket, startOfMinskDay, startOfMinskMonth, usagePeriod } from "@/lib/minskTime";
 
 function startOfDay() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+  return startOfMinskDay();
 }
 
 function startOfMonth() {
-  const d = new Date();
-  d.setDate(1);
-  d.setHours(0, 0, 0, 0);
-  return d;
+  return startOfMinskMonth();
 }
 
-function sumCost(
-  rows: Array<{ model: string; inputTokens: number; outputTokens: number }>,
-  models: LLMModelInfo[],
-) {
-  return rows.reduce(
-    (sum, row) => sum + costUsd(row.model, { inputTokens: row.inputTokens, outputTokens: row.outputTokens }, models),
-    0,
-  );
+function rowCost(row: { estimatedCost: number }) {
+  return row.estimatedCost;
+}
+
+function sumCost(rows: Array<{ estimatedCost: number }>) {
+  return rows.reduce((sum, row) => sum + row.estimatedCost, 0);
 }
 
 export async function GET(req: Request) {
@@ -33,12 +27,13 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const agentId = url.searchParams.get("agentId") || undefined;
   const range = url.searchParams.get("range") || "all";
+  const bucket = parseUsageBucket(url.searchParams.get("bucket"));
 
   let models: LLMModelInfo[] = [];
   try {
     models = await getPricedModels();
-  } catch (e) {
-    return error(e instanceof Error ? e.message : "Не удалось загрузить цены", 502);
+  } catch {
+    models = [];
   }
 
   const where = agentId ? { agentId } : {};
@@ -53,6 +48,7 @@ export async function GET(req: Request) {
         inputTokens: true,
         outputTokens: true,
         totalTokens: true,
+        estimatedCost: true,
         requestType: true,
         createdAt: true,
       },
@@ -75,7 +71,7 @@ export async function GET(req: Request) {
     bucket.requests += 1;
     bucket.inputTokens += row.inputTokens;
     bucket.outputTokens += row.outputTokens;
-    bucket.cost += costUsd(row.model, row, models);
+    bucket.cost += rowCost(row);
   };
 
   const byModelMap = new Map<string, Bucket>();
@@ -157,24 +153,16 @@ export async function GET(req: Request) {
     })
     .sort((a, b) => b.totalTokens - a.totalTokens);
 
-  const dayKey = (date: Date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, "0");
-    const d = String(date.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
-  };
   const dailyMap = new Map<string, Bucket>();
   for (let i = 29; i >= 0; i -= 1) {
-    const date = new Date();
-    date.setHours(0, 0, 0, 0);
-    date.setDate(date.getDate() - i);
-    dailyMap.set(dayKey(date), emptyBucket());
+    const date = new Date(startOfMinskDay().getTime() - i * 24 * 60 * 60 * 1000);
+    dailyMap.set(minskDayKey(date), emptyBucket());
   }
   for (const row of rows) {
-    const key = dayKey(row.createdAt);
-    const bucket = dailyMap.get(key);
-    if (!bucket) continue;
-    addBucket(bucket, row);
+    const key = minskDayKey(row.createdAt);
+    const dayBucket = dailyMap.get(key);
+    if (!dayBucket) continue;
+    addBucket(dayBucket, row);
   }
   const daily = Array.from(dailyMap.entries()).map(([date, stat]) => ({
     date,
@@ -187,11 +175,10 @@ export async function GET(req: Request) {
 
   const recent = [...scoped]
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .slice(0, 40)
     .map((row) => {
       const info = row.agentId ? agentName.get(row.agentId) : undefined;
       const modelInfo = priceOf(row.model);
-      const cost = costUsd(row.model, row, models);
+      const cost = rowCost(row);
       return {
         id: row.id,
         createdAt: row.createdAt.toISOString(),
@@ -217,10 +204,50 @@ export async function GET(req: Request) {
     { input: 0, output: 0 },
   );
 
+  const seriesMap = new Map<
+    string,
+    { key: string; label: string; agentId: string; requests: number; inputTokens: number; outputTokens: number; cost: number }
+  >();
+  for (const row of scoped) {
+    if (!row.agentId) continue;
+    const period = usagePeriod(row.createdAt, bucket);
+    const seriesKey = `${period.key}\0${row.agentId}`;
+    const stat = seriesMap.get(seriesKey) ?? {
+      key: period.key,
+      label: period.label,
+      agentId: row.agentId,
+      requests: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cost: 0,
+    };
+    stat.requests += 1;
+    stat.inputTokens += row.inputTokens;
+    stat.outputTokens += row.outputTokens;
+    stat.cost += row.estimatedCost;
+    seriesMap.set(seriesKey, stat);
+  }
+  const series = Array.from(seriesMap.values())
+    .map((stat) => {
+      const info = agentName.get(stat.agentId);
+      return {
+        key: stat.key,
+        label: stat.label,
+        agentId: stat.agentId,
+        agentName: info?.name ?? "Удалённый агент",
+        requests: stat.requests,
+        inputTokens: stat.inputTokens,
+        outputTokens: stat.outputTokens,
+        totalTokens: stat.inputTokens + stat.outputTokens,
+        costLabel: formatUsd(stat.cost),
+      };
+    })
+    .sort((a, b) => b.key.localeCompare(a.key) || a.agentName.localeCompare(b.agentName, "ru"));
+
   const totals = {
-    all: sumCost(rows, models),
-    today: sumCost(todayRows, models),
-    month: sumCost(monthRows, models),
+    all: sumCost(rows),
+    today: sumCost(todayRows),
+    month: sumCost(monthRows),
     requests: rows.length,
     todayRequests: todayRows.length,
     monthRequests: monthRows.length,
@@ -242,6 +269,8 @@ export async function GET(req: Request) {
     byAgent,
     byAgentModel,
     daily,
+    bucket,
+    series,
     recent,
     prices: models
       .filter((m) => !m.isImage && m.pricing)

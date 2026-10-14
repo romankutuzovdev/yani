@@ -10,14 +10,12 @@
 
   var agentId = script && script.getAttribute("data-agent-id");
   var agentSlug = script && script.getAttribute("data-agent-slug");
-  var apiKey = script && script.getAttribute("data-api-key");
   var base =
     (script && script.getAttribute("data-base-url")) ||
     (script && script.src ? script.src.replace(/\/widget\.js.*$/, "") : "");
 
   if (!agentId && !agentSlug) {
-    console.error("[Yani Widget] data-agent-id or data-agent-slug is required");
-    return;
+    agentSlug = "primary";
   }
 
   var host = document.createElement("div");
@@ -29,31 +27,34 @@
 
   var cfg = {
     position: "bottom-right",
-    theme: "light",
-    primaryColor: "#0284c7",
-    buttonLabel: "Чат",
-    greeting: "Привет! Чем могу помочь?",
+    size: 68,
+    offsetBottom: 2,
+    offsetSide: 2,
+    asideText: "",
   };
+
+  function clamp(n, min, max) {
+    n = Number(n);
+    if (!isFinite(n)) return min;
+    return Math.min(max, Math.max(min, n));
+  }
 
   function side() {
     return cfg.position === "bottom-left" ? "left" : "right";
   }
 
-  function isDark() {
-    return cfg.theme === "dark";
-  }
-
   function paint() {
     var s = side();
-    var dark = isDark();
-    var bg = dark ? "#0b1220" : "#ffffff";
-    var fg = dark ? "#e2e8f0" : "#0f172a";
-    var muted = dark ? "#94a3b8" : "#64748b";
-    var border = dark ? "rgba(255,255,255,.1)" : "rgba(15,23,42,.1)";
-    var userBg = cfg.primaryColor || "#0284c7";
-    var botBg = dark ? "rgba(255,255,255,.06)" : "#f1f5f9";
-    var inputBg = dark ? "#020617" : "#f8fafc";
-
+    var size = clamp(cfg.size, 44, 140);
+    var bottom = clamp(cfg.offsetBottom, 0, 40);
+    var sidePct = clamp(cfg.offsetSide, 0, 40);
+    var gap = 12;
+    var lift = size + gap;
+    var sideGap = "calc(" + sidePct + "vw + 12px)";
+    var roomW = "calc(100vw - " + sidePct + "vw - 24px)";
+    var roomH = "calc(100dvh - " + bottom + "vh - " + (lift + 16) + "px)";
+    var panelW = "min(400px, " + roomW + ", calc(" + roomH + " * 0.68))";
+    var panelH = "min(" + roomH + ", 720px, calc(" + panelW + " * 1.55))";
     var style = shadow.querySelector("style");
     if (!style) {
       style = document.createElement("style");
@@ -61,109 +62,84 @@
     }
     style.textContent =
       ":host{all:initial}" +
-      ".yani-fab{position:fixed;" +
+      ".yani-dock{position:fixed;" +
       s +
-      ":16px;bottom:16px;z-index:2147483000;width:68px;height:68px;padding:0;border-radius:999px;border:3px solid #fff;cursor:pointer;background:#fff;box-shadow:0 10px 30px rgba(15,23,42,.28);overflow:hidden;display:inline-flex;align-items:center;justify-content:center}" +
-      ".yani-fab-hero{width:100%;height:100%;object-fit:cover;display:block;background:#fff}" +
+      ":" +
+      sidePct +
+      "vw;bottom:" +
+      bottom +
+      "vh;z-index:2147483000;display:flex;align-items:center;gap:10px;" +
+      (s === "left" ? "flex-direction:row" : "flex-direction:row-reverse") +
+      "}" +
+      ".yani-fab{width:" +
+      size +
+      "px;height:" +
+      size +
+      "px;padding:0;border-radius:999px;border:3px solid #fff;cursor:pointer;background:#f3eefc;box-shadow:0 10px 30px rgba(107,82,176,.28);overflow:hidden;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}" +
+      ".yani-fab-hero{width:100%;height:100%;object-fit:contain;object-position:center;display:block;background:#f3eefc}" +
+      ".yani-aside{max-width:min(220px,36vw);padding:8px 12px;border-radius:16px;background:#fff;border:1px solid #c9b5f5;box-shadow:0 8px 24px rgba(107,82,176,.18);font:600 13px/1.3 system-ui,sans-serif;color:#4c3a7a;white-space:pre-wrap;word-break:break-word}" +
+      ".yani-aside:empty{display:none}" +
       ".yani-panel{position:fixed;" +
       s +
-      ":16px;bottom:84px;z-index:2147483000;width:min(380px,calc(100vw - 24px));height:min(560px,calc(100vh - 110px));border-radius:20px;overflow:hidden;background:" +
-      bg +
-      ";color:" +
-      fg +
-      ";box-shadow:0 25px 80px rgba(15,23,42,.28);display:none;flex-direction:column;font:14px/1.45 system-ui,-apple-system,sans-serif;border:1px solid " +
-      border +
-      "}" +
+      ":" +
+      sideGap +
+      ";bottom:calc(" +
+      bottom +
+      "vh + " +
+      lift +
+      "px);z-index:2147483000;width:" +
+      panelW +
+      ";height:" +
+      panelH +
+      ";max-width:" +
+      roomW +
+      ";max-height:" +
+      roomH +
+      ";aspect-ratio:5/8;border-radius:24px;overflow:hidden;background:#fff;color:#0f172a;box-shadow:0 25px 80px rgba(107,82,176,.28);display:none;flex-direction:column;border:1px solid #c9b5f5;box-sizing:border-box}" +
       ".yani-panel.open{display:flex}" +
-      ".yani-head{padding:14px 16px;border-bottom:1px solid " +
-      border +
-      ";display:flex;gap:12px;align-items:center;background:" +
-      (dark ? "linear-gradient(180deg,rgba(255,255,255,.04),transparent)" : "#fff") +
-      "}" +
-      ".yani-avatar-wrap{width:44px;height:44px;border-radius:999px;overflow:hidden;flex-shrink:0;background:" +
-      (dark ? "rgba(255,255,255,.06)" : "#e0f2fe") +
-      ";border:1px solid " +
-      border +
-      "}" +
-      ".yani-avatar{width:100%;height:100%;object-fit:contain;display:block}" +
-      ".yani-title{font-weight:650;margin:0;font-size:15px}" +
-      ".yani-sub{margin:2px 0 0;font-size:12px;color:" +
-      muted +
-      "}" +
-      ".yani-close{margin-left:auto;border:0;background:transparent;color:" +
-      muted +
-      ";cursor:pointer;font-size:20px;line-height:1;padding:4px 6px}" +
-      ".yani-msgs{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px;-webkit-overflow-scrolling:touch}" +
-      ".yani-msg{padding:10px 12px;border-radius:14px;max-width:90%;white-space:pre-wrap;word-break:break-word}" +
-      ".yani-msg.user{align-self:flex-end;background:" +
-      userBg +
-      ";color:#fff}" +
-      ".yani-msg.bot{align-self:flex-start;background:" +
-      botBg +
-      ";color:" +
-      fg +
-      "}" +
-      ".yani-limit{align-self:stretch;margin:4px 0;padding:18px 16px;border-radius:18px;text-align:center;background:#f5f3ff;border:1px solid #ddd6fe;color:#1e1b4b}" +
-      ".yani-limit b{display:block;font-size:15px;font-weight:650;margin:0 0 6px}" +
-      ".yani-limit span{display:block;font-size:13px;line-height:1.45;color:#64748b;font-weight:400}" +
-      ".yani-btn{display:block;margin-top:8px;padding:10px 14px;border-radius:12px;background:#6d28d9;color:#fff;text-decoration:none;font-weight:650;text-align:center}" +
-      ".yani-foot{display:flex;gap:8px;padding:12px;border-top:1px solid " +
-      border +
-      ";background:" +
-      bg +
-      "}" +
-      ".yani-input{flex:1;border-radius:12px;border:1px solid " +
-      border +
-      ";background:" +
-      inputBg +
-      ";color:" +
-      fg +
-      ";padding:10px 12px;outline:none;font:14px/1.4 system-ui,sans-serif}" +
-      ".yani-send{border:0;border-radius:12px;background:" +
-      userBg +
-      ";color:#fff;font-weight:650;padding:0 14px;cursor:pointer;min-width:72px}" +
-      ".yani-send:disabled{opacity:.5;cursor:default}" +
-      "@media (max-width:480px){.yani-panel{right:0!important;left:0!important;bottom:0;width:100vw;height:100dvh;max-height:100dvh;border-radius:0}.yani-fab{bottom:max(16px,env(safe-area-inset-bottom));" +
+      ".yani-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;height:40px;padding:0 8px 0 14px;background:#f3eefc;border-bottom:1px solid #c9b5f5;flex-shrink:0;font:600 13px/1 system-ui,sans-serif;color:#6b52b0}" +
+      ".yani-frame{flex:1;width:100%;min-height:0;border:0;background:#fff}" +
+      ".yani-x{width:32px;height:32px;border-radius:999px;border:0;background:#f3ebfe;color:#6b52b0;font-size:20px;line-height:1;cursor:pointer}" +
+      "@media (max-width:700px){.yani-panel{left:0!important;right:0!important;top:0!important;bottom:0!important;width:100%!important;height:100%!important;max-width:none;max-height:none;aspect-ratio:auto;border-radius:0;border:0}.yani-dock{bottom:max(" +
+      bottom +
+      "vh,env(safe-area-inset-bottom));" +
       s +
-      ":max(16px,env(safe-area-inset-right))}}";
+      ":max(" +
+      sidePct +
+      "vw,env(safe-area-inset-" +
+      s +
+      "))}}";
   }
 
   root.innerHTML =
-    '<button class="yani-fab" type="button" aria-label="Открыть чат"></button>' +
-    '<div class="yani-panel" role="dialog" aria-label="Чат с AI-агентом">' +
-    '  <div class="yani-head">' +
-    '    <div class="yani-avatar-wrap"></div>' +
-    '    <div><p class="yani-title">Агент</p><p class="yani-sub">Онлайн</p></div>' +
-    '    <button class="yani-close" type="button" aria-label="Закрыть">×</button>' +
-    "  </div>" +
-    '  <div class="yani-msgs"></div>' +
-    '  <div class="yani-foot">' +
-    '    <input class="yani-input" placeholder="Напишите сообщение…" />' +
-    '    <button class="yani-send" type="button">Отпр.</button>' +
-    "  </div>" +
+    '<div class="yani-dock">' +
+    '  <button class="yani-fab" type="button" aria-label="Открыть чат"></button>' +
+    '  <div class="yani-aside" hidden></div>' +
+    "</div>" +
+    '<div class="yani-panel" role="dialog" aria-label="Чат">' +
+    '  <div class="yani-bar"><span>Чат</span><button class="yani-x" type="button" aria-label="Закрыть">×</button></div>' +
+    '  <iframe class="yani-frame" title="Чат"></iframe>' +
     "</div>";
 
   paint();
 
   var fab = root.querySelector(".yani-fab");
+  var aside = root.querySelector(".yani-aside");
   var panel = root.querySelector(".yani-panel");
-  var msgs = root.querySelector(".yani-msgs");
-  var input = root.querySelector(".yani-input");
-  var sendBtn = root.querySelector(".yani-send");
-  var title = root.querySelector(".yani-title");
-  var sub = root.querySelector(".yani-sub");
-  var avatarWrap = root.querySelector(".yani-avatar-wrap");
-  var closeBtn = root.querySelector(".yani-close");
-  var sessionId = "widget-" + Math.random().toString(36).slice(2);
-  var resolvedAgentId = agentId;
-  var busy = false;
+  var frame = root.querySelector(".yani-frame");
+  var closeBtn = root.querySelector(".yani-x");
+  var chatUrl = "";
+  var fabCleanup = null;
+
+  function detachFabVideo() {
+    if (fabCleanup) fabCleanup();
+    fabCleanup = null;
+  }
 
   function toggle(open) {
-    if (typeof open === "boolean") {
-      panel.classList.toggle("open", open);
-    } else {
-      panel.classList.toggle("open");
-    }
+    var next = typeof open === "boolean" ? open : !panel.classList.contains("open");
+    panel.classList.toggle("open", next);
+    if (next && chatUrl && frame.getAttribute("src") !== chatUrl) frame.src = chatUrl;
   }
 
   fab.addEventListener("click", function () {
@@ -172,50 +148,6 @@
   closeBtn.addEventListener("click", function () {
     toggle(false);
   });
-
-  function splitButtons(raw) {
-    var buttons = [];
-    var text = String(raw || "").replace(
-      /\[\[кнопка:\s*([^|\]]+?)\s*\|\s*(https?:\/\/[^\]\s]+)\s*\]\]/gi,
-      function (_m, label, href) {
-        var name = String(label || "").trim();
-        if (!name) return _m;
-        buttons.push({ label: name, href: href });
-        return "";
-      },
-    );
-    return { text: text.replace(/\n{3,}/g, "\n\n").trim(), buttons: buttons };
-  }
-
-  function paintReply(bubble, raw, streaming) {
-    var source = streaming ? String(raw || "").replace(/\[\[кнопка:[^\]]*$/i, "") : raw;
-    var parsed = splitButtons(source);
-    bubble.textContent = "";
-    if (parsed.text) {
-      bubble.appendChild(document.createTextNode(parsed.text));
-    } else if (!parsed.buttons.length) {
-      bubble.appendChild(document.createTextNode(streaming ? "Думаю…" : "Пустой ответ"));
-    }
-    parsed.buttons.forEach(function (button) {
-      var link = document.createElement("a");
-      link.className = "yani-btn";
-      link.href = button.href;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.textContent = button.label;
-      bubble.appendChild(link);
-    });
-    msgs.scrollTop = msgs.scrollHeight;
-  }
-
-  function addMsg(role, text) {
-    var el = document.createElement("div");
-    el.className = "yani-msg " + (role === "user" ? "user" : "bot");
-    if (role === "user") el.textContent = text;
-    else paintReply(el, text, false);
-    msgs.appendChild(el);
-    msgs.scrollTop = msgs.scrollHeight;
-  }
 
   function pickAsset(agent, status) {
     var assets = (agent.character && agent.character.assets) || [];
@@ -248,6 +180,7 @@
 
   function setFab(asset, logoUrl) {
     if (!fab) return;
+    detachFabVideo();
     var url = (asset && asset.url) || logoUrl || "";
     fab.textContent = "";
     if (!url) return;
@@ -259,8 +192,294 @@
       video.autoplay = true;
       video.loop = true;
       video.muted = true;
+      video.defaultMuted = true;
+      video.setAttribute("autoplay", "");
+      video.setAttribute("loop", "");
+      video.setAttribute("muted", "");
       video.setAttribute("playsinline", "");
+      video.setAttribute("webkit-playsinline", "");
+      var wrapped = false;
+      var hiddenAt = 0;
+      var lastSeen = Date.now();
+      var recoveries = 0;
+      var recovering = false;
+      var verifyTimers = [];
+      var NEAR_END_SEC = 0.06;
+      var LEFT_START_SEC = 0.2;
+      var HARD_AWAY_MS = 1500;
+      var STANDALONE_HARD_AWAY_MS = 300;
+      var STANDALONE_UNSEEN_MS = 5000;
+      var seenTimer = setInterval(function () {
+        if (document.visibilityState === "visible") lastSeen = Date.now();
+      }, 1000);
+      function isStandaloneApp() {
+        try {
+          return (
+            (window.matchMedia &&
+              window.matchMedia("(display-mode: standalone)").matches) ||
+            window.navigator.standalone === true
+          );
+        } catch (e) {
+          return false;
+        }
+      }
+      function playSafe() {
+        var play = video.play();
+        if (play && play.catch) play.catch(function () {});
+      }
+      function clearVerify() {
+        while (verifyTimers.length) {
+          clearTimeout(verifyTimers.pop());
+        }
+      }
+      function looksAlive() {
+        return (
+          !video.paused &&
+          !video.ended &&
+          video.readyState >= 2 &&
+          video.videoWidth > 0
+        );
+      }
+      function standaloneWasAway() {
+        if (!isStandaloneApp()) return false;
+        var now = Date.now();
+        if (hiddenAt > 0 && now - hiddenAt >= STANDALONE_HARD_AWAY_MS) return true;
+        return now - lastSeen >= STANDALONE_UNSEEN_MS;
+      }
+      function needsHardRecover(force) {
+        if (video.ended) return true;
+        if (video.readyState < 2) return true;
+        if (video.videoWidth === 0) return true;
+        if (force && standaloneWasAway()) return true;
+        if (!force || hiddenAt <= 0) return false;
+        return Date.now() - hiddenAt >= HARD_AWAY_MS;
+      }
+      function scheduleVerify() {
+        clearVerify();
+        [350, 1200].forEach(function (ms) {
+          verifyTimers.push(
+            setTimeout(function () {
+              if (document.visibilityState === "hidden") return;
+              if (looksAlive()) {
+                recoveries = 0;
+                return;
+              }
+              hardRecover();
+            }, ms),
+          );
+        });
+      }
+      function hardRecover() {
+        if (recovering || recoveries >= 6) return;
+        recovering = true;
+        recoveries += 1;
+        var resumeAt = video.currentTime;
+        wrapped = true;
+        var src = (video.currentSrc || video.getAttribute("src") || "").replace(/#.*$/, "");
+        function restore() {
+          video.removeEventListener("loadeddata", restore);
+          recovering = false;
+          if (isFinite(resumeAt) && resumeAt > 0.05) {
+            try {
+              video.currentTime = resumeAt;
+            } catch (e) {}
+          }
+          refillAfterShow();
+        }
+        video.addEventListener("loadeddata", restore);
+        try {
+          video.pause();
+          video.removeAttribute("src");
+          video.load();
+          if (src) video.src = src;
+          video.load();
+        } catch (e) {
+          recovering = false;
+          video.removeEventListener("loadeddata", restore);
+        }
+        setTimeout(function () {
+          recovering = false;
+        }, 4000);
+        var attempt = video.play();
+        if (attempt && attempt.then) {
+          attempt.then(
+            function () {
+              scheduleVerify();
+            },
+            function () {
+              scheduleVerify();
+            },
+          );
+        } else {
+          scheduleVerify();
+        }
+      }
+      function rewindNearEnd() {
+        var duration = video.duration;
+        var time = video.currentTime;
+        if (!isFinite(duration) || duration <= 0.25) return;
+        var remaining = duration - time;
+        if (wrapped) {
+          if (time > LEFT_START_SEC && remaining > 0.15) wrapped = false;
+          return;
+        }
+        if (time <= LEFT_START_SEC) return;
+        if (remaining > NEAR_END_SEC || remaining < -0.05) return;
+        wrapped = true;
+        try {
+          video.currentTime = 0;
+        } catch (e) {
+          wrapped = false;
+          return;
+        }
+        playSafe();
+      }
+      function onEnded() {
+        wrapped = true;
+        try {
+          video.currentTime = 0;
+        } catch (e) {}
+        playSafe();
+      }
+      function fillFrame() {
+        if (document.visibilityState === "hidden") return;
+        var parent = video.parentElement;
+        if (!parent) return;
+        var size = Math.round(Math.min(parent.clientWidth, parent.clientHeight));
+        if (size < 8) return;
+        video.removeAttribute("width");
+        video.removeAttribute("height");
+        video.style.margin = "0";
+        video.style.transform = "none";
+        video.style.setProperty("width", size + "px", "important");
+        video.style.setProperty("height", size + "px", "important");
+        video.style.setProperty("object-fit", "contain", "important");
+        video.style.setProperty("object-position", "center center", "important");
+      }
+      function refillAfterShow() {
+        if (document.visibilityState === "hidden") return;
+        fillFrame();
+        requestAnimationFrame(function () {
+          fillFrame();
+          var parent = video.parentElement;
+          if (!parent) return;
+          var size = Math.min(parent.clientWidth, parent.clientHeight);
+          if (size >= 8 && (video.clientWidth < size * 0.8 || video.clientHeight < size * 0.8)) {
+            video.style.display = "none";
+            void video.offsetWidth;
+            video.style.display = "block";
+            fillFrame();
+            playSafe();
+          }
+        });
+      }
+      function wake(force) {
+        if (document.visibilityState === "hidden") return;
+        if (force && standaloneWasAway()) recoveries = 0;
+        refillAfterShow();
+        if (needsHardRecover(!!force)) {
+          hardRecover();
+          hiddenAt = 0;
+          lastSeen = Date.now();
+          return;
+        }
+        if (video.ended) {
+          onEnded();
+          scheduleVerify();
+          hiddenAt = 0;
+          return;
+        }
+        var attempt = video.play();
+        if (attempt && attempt.then) {
+          attempt.then(
+            function () {
+              scheduleVerify();
+            },
+            function () {
+              scheduleVerify();
+            },
+          );
+        } else {
+          scheduleVerify();
+        }
+        hiddenAt = 0;
+        lastSeen = Date.now();
+      }
+      function wakeStandaloneSoon() {
+        if (!isStandaloneApp()) {
+          wake(false);
+          return;
+        }
+        wake(true);
+        setTimeout(function () {
+          wake(true);
+        }, 500);
+      }
+      function onShow() {
+        wakeStandaloneSoon();
+      }
+      function onPageShow() {
+        wakeStandaloneSoon();
+      }
+      function onFreeze() {
+        hiddenAt = Date.now();
+        clearVerify();
+      }
+      function onVideoError() {
+        if (recovering || document.visibilityState === "hidden") return;
+        if (!isStandaloneApp()) return;
+        hardRecover();
+      }
+      function onVisibility() {
+        if (document.visibilityState === "hidden") {
+          hiddenAt = Date.now();
+          clearVerify();
+          return;
+        }
+        wakeStandaloneSoon();
+      }
+      function onPause() {
+        if (document.visibilityState === "hidden") return;
+        if (video.ended) {
+          onEnded();
+          return;
+        }
+        playSafe();
+      }
+      function onPlaying() {
+        if (video.videoWidth > 0) recoveries = 0;
+        refillAfterShow();
+      }
+      video.addEventListener("timeupdate", rewindNearEnd);
+      video.addEventListener("ended", onEnded);
+      video.addEventListener("pause", onPause);
+      video.addEventListener("playing", onPlaying);
+      video.addEventListener("error", onVideoError);
+      video.addEventListener("loadeddata", refillAfterShow);
+      video.addEventListener("resize", refillAfterShow);
+      document.addEventListener("visibilitychange", onVisibility);
+      document.addEventListener("freeze", onFreeze);
+      document.addEventListener("resume", onShow);
+      window.addEventListener("pageshow", onPageShow);
+      window.addEventListener("focus", onShow);
+      fabCleanup = function () {
+        clearVerify();
+        clearInterval(seenTimer);
+        video.removeEventListener("timeupdate", rewindNearEnd);
+        video.removeEventListener("ended", onEnded);
+        video.removeEventListener("pause", onPause);
+        video.removeEventListener("playing", onPlaying);
+        video.removeEventListener("error", onVideoError);
+        video.removeEventListener("loadeddata", refillAfterShow);
+        video.removeEventListener("resize", refillAfterShow);
+        document.removeEventListener("visibilitychange", onVisibility);
+        document.removeEventListener("freeze", onFreeze);
+        document.removeEventListener("resume", onShow);
+        window.removeEventListener("pageshow", onPageShow);
+        window.removeEventListener("focus", onShow);
+      };
       fab.appendChild(video);
+      onShow();
       return;
     }
     var img = document.createElement("img");
@@ -270,26 +489,15 @@
     fab.appendChild(img);
   }
 
-  function setAvatar(asset, logoUrl) {
-    if (!avatarWrap) return;
-    var url = (asset && asset.url) || logoUrl || "";
-    if (!url) {
-      avatarWrap.innerHTML = "";
-      return;
-    }
-    var src = url.indexOf("http") === 0 ? url : base + url;
-    if (asset && isVideoAsset(asset)) {
-      avatarWrap.innerHTML =
-        '<video class="yani-avatar" src="' +
-        src +
-        '" autoplay loop muted playsinline></video>';
-    } else {
-      avatarWrap.innerHTML = '<img class="yani-avatar" alt="" src="' + src + '" />';
-    }
+  function setAside(text) {
+    if (!aside) return;
+    var t = (text || "").trim();
+    aside.textContent = t;
+    if (t) aside.removeAttribute("hidden");
+    else aside.setAttribute("hidden", "");
   }
 
   function applyAgent(agent) {
-    resolvedAgentId = agent.id || resolvedAgentId;
     var wcfg =
       (agent.widget && agent.widget.config) ||
       (typeof agent.widget === "object" && agent.widget) ||
@@ -301,20 +509,19 @@
         wcfg = {};
       }
     }
-    cfg.position = wcfg.position || cfg.position;
-    cfg.theme = wcfg.theme || cfg.theme;
-    cfg.primaryColor = wcfg.primaryColor || cfg.primaryColor;
-    cfg.buttonLabel = wcfg.buttonLabel || cfg.buttonLabel;
-    cfg.greeting =
-      wcfg.greeting || agent.greeting || agent.description || cfg.greeting;
-
+    cfg.position = wcfg.position === "bottom-left" ? "bottom-left" : "bottom-right";
+    cfg.size = clamp(wcfg.size != null ? wcfg.size : cfg.size, 44, 140);
+    cfg.offsetBottom = clamp(
+      wcfg.offsetBottom != null ? wcfg.offsetBottom : cfg.offsetBottom,
+      0,
+      40,
+    );
+    cfg.offsetSide = clamp(wcfg.offsetSide != null ? wcfg.offsetSide : cfg.offsetSide, 0, 40);
     paint();
-    title.textContent = agent.name || "Агент";
-    sub.textContent = agent.statusMessage || "Онлайн";
-    var hero = pickAsset(agent, "IDLE");
-    setFab(hero, agent.logoUrl);
-    setAvatar(pickAsset(agent, agent.status), agent.logoUrl);
-    if (!msgs.childElementCount) addMsg("bot", cfg.greeting);
+    setAside(agent.asideText || wcfg.asideText || "");
+    var slug = agent.slug || "";
+    chatUrl = slug ? base + "/chat?slug=" + encodeURIComponent(slug) : base + "/chat";
+    setFab(pickAsset(agent, "IDLE"), agent.logoUrl);
   }
 
   function bootstrapUrl() {
@@ -343,117 +550,4 @@
     .catch(function (err) {
       console.error("[Yani Widget]", err);
     });
-
-  function showLimit(bubble, code) {
-    var month = code === "monthly_limit";
-    bubble.className = "yani-limit";
-    bubble.textContent = "";
-    var title = document.createElement("b");
-    title.textContent = month
-      ? "Лимит запросов на месяц исчерпан"
-      : "Лимит запросов на сегодня исчерпан";
-    var note = document.createElement("span");
-    note.textContent = month
-      ? "В этом месяце новые сообщения больше не принимаются. Лимит обновится в начале следующего месяца."
-      : "На сегодня сообщения закончились. Завтра можно будет написать снова.";
-    bubble.appendChild(title);
-    bubble.appendChild(note);
-    input.disabled = true;
-    sendBtn.disabled = true;
-    sub.textContent = "Лимит исчерпан";
-    msgs.scrollTop = msgs.scrollHeight;
-  }
-
-  function send() {
-    var text = (input.value || "").trim();
-    if (!text || busy || !resolvedAgentId) return;
-    input.value = "";
-    addMsg("user", text);
-    sub.textContent = "Думаю…";
-    busy = true;
-    sendBtn.disabled = true;
-
-    var headers = { "Content-Type": "application/json" };
-    if (apiKey) headers.Authorization = "Bearer " + apiKey;
-
-    var bubble = document.createElement("div");
-    bubble.className = "yani-msg bot";
-    bubble.textContent = "Думаю…";
-    msgs.appendChild(bubble);
-    msgs.scrollTop = msgs.scrollHeight;
-
-    fetch(base + "/api/v1/agents/" + encodeURIComponent(resolvedAgentId) + "/chat", {
-      method: "POST",
-      headers: headers,
-      body: JSON.stringify({ message: text, sessionId: sessionId, stream: true }),
-    })
-      .then(function (r) {
-        var ctype = r.headers.get("content-type") || "";
-          if (!ctype.includes("text/event-stream") || !r.body) {
-          return r.json().then(function (data) {
-            if (data.code === "monthly_limit" || data.code === "daily_limit") {
-              showLimit(bubble, data.code);
-              return;
-            }
-            paintReply(bubble, data.reply || data.error || "Нет ответа", false);
-            sub.textContent = data.success === false ? "Ошибка" : "Онлайн";
-          });
-        }
-        var reader = r.body.getReader();
-        var decoder = new TextDecoder();
-        var buf = "";
-        var acc = "";
-        function pump() {
-          return reader.read().then(function (chunk) {
-            if (chunk.done) {
-              paintReply(bubble, acc.trim(), false);
-              sub.textContent = "Онлайн";
-              return;
-            }
-            buf += decoder.decode(chunk.value, { stream: true });
-            var parts = buf.split("\n\n");
-            buf = parts.pop() || "";
-            parts.forEach(function (part) {
-              var line = part
-                .split("\n")
-                .map(function (l) {
-                  return l.trim();
-                })
-                .find(function (l) {
-                  return l.indexOf("data:") === 0;
-                });
-              if (!line) return;
-              var data;
-              try {
-                data = JSON.parse(line.slice(5).trim());
-              } catch (e) {
-                return;
-              }
-              if (data.delta) {
-                acc += data.delta;
-                paintReply(bubble, acc, true);
-              }
-              if (data.error) acc = acc || data.error;
-              if (data.done && data.reply) acc = data.reply;
-              if (data.done) sub.textContent = data.success === false ? "Ошибка" : "Онлайн";
-            });
-            return pump();
-          });
-        }
-        return pump();
-      })
-      .catch(function () {
-        bubble.textContent = "Сетевая ошибка";
-        sub.textContent = "Ошибка";
-      })
-      .finally(function () {
-        busy = false;
-        sendBtn.disabled = false;
-      });
-  }
-
-  sendBtn.addEventListener("click", send);
-  input.addEventListener("keydown", function (e) {
-    if (e.key === "Enter") send();
-  });
 })();

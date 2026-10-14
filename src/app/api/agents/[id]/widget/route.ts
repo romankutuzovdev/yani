@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { error, json, requireAdmin, writeLog } from "@/lib/api";
+import { error, json, requireAgentStaff, writeLog } from "@/lib/api";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -13,6 +13,9 @@ const widgetSchema = z.object({
   theme: z.enum(["light", "dark"]).optional(),
   primaryColor: z.string().optional(),
   buttonLabel: z.string().optional(),
+  size: z.number().int().min(44).max(140).optional(),
+  offsetBottom: z.number().min(0).max(40).optional(),
+  offsetSide: z.number().min(0).max(40).optional(),
 });
 
 function parseConfig(raw: string | null | undefined) {
@@ -23,14 +26,27 @@ function parseConfig(raw: string | null | undefined) {
   }
 }
 
+function defaults(agent: { name: string; greeting: string }) {
+  return {
+    greeting: agent.greeting || "Привет! Чем могу помочь?",
+    position: "bottom-right",
+    theme: "light",
+    primaryColor: "#8b6fd4",
+    buttonLabel: "Чат",
+    size: 68,
+    offsetBottom: 2,
+    offsetSide: 2,
+  };
+}
+
 export async function GET(_req: NextRequest, { params }: Params) {
-  const admin = await requireAdmin();
-  if (admin instanceof Response) return admin;
   const { id } = await params;
+  const staff = await requireAgentStaff(id);
+  if (staff instanceof Response) return staff;
 
   const agent = await prisma.agent.findUnique({
     where: { id },
-    select: { id: true, slug: true, name: true, greeting: true },
+    select: { id: true, slug: true, name: true, greeting: true, asideText: true },
   });
   if (!agent) return error("Agent not found", 404);
 
@@ -45,39 +61,38 @@ export async function GET(_req: NextRequest, { params }: Params) {
         agentId: id,
         name: `${agent.name} Widget`,
         enabled: true,
-        config: JSON.stringify({
-          greeting: agent.greeting || "Привет! Чем могу помочь?",
-          position: "bottom-right",
-          theme: "light",
-          primaryColor: "#0284c7",
-          buttonLabel: "Чат",
-        }),
+        config: JSON.stringify(defaults(agent)),
       },
     });
   }
 
-  const config = parseConfig(widget.config);
+  const config = { ...defaults(agent), ...parseConfig(widget.config) };
   return json({
     widget: {
       id: widget.id,
       name: widget.name,
       enabled: widget.enabled,
       config,
-      agent: { id: agent.id, slug: agent.slug, name: agent.name },
+      agent: {
+        id: agent.id,
+        slug: agent.slug,
+        name: agent.name,
+        asideText: agent.asideText,
+      },
     },
   });
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const admin = await requireAdmin();
-  if (admin instanceof Response) return admin;
   const { id } = await params;
+  const staff = await requireAgentStaff(id);
+  if (staff instanceof Response) return staff;
 
   try {
     const body = widgetSchema.parse(await req.json());
     const agent = await prisma.agent.findUnique({
       where: { id },
-      select: { id: true, slug: true, name: true, greeting: true },
+      select: { id: true, slug: true, name: true, greeting: true, asideText: true },
     });
     if (!agent) return error("Agent not found", 404);
 
@@ -86,7 +101,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       orderBy: { createdAt: "asc" },
     });
 
-    const prev = parseConfig(widget?.config);
+    const prev = { ...defaults(agent), ...parseConfig(widget?.config) };
     const nextConfig = {
       ...prev,
       ...(body.greeting !== undefined ? { greeting: body.greeting } : {}),
@@ -94,6 +109,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       ...(body.theme !== undefined ? { theme: body.theme } : {}),
       ...(body.primaryColor !== undefined ? { primaryColor: body.primaryColor } : {}),
       ...(body.buttonLabel !== undefined ? { buttonLabel: body.buttonLabel } : {}),
+      ...(body.size !== undefined ? { size: body.size } : {}),
+      ...(body.offsetBottom !== undefined ? { offsetBottom: body.offsetBottom } : {}),
+      ...(body.offsetSide !== undefined ? { offsetSide: body.offsetSide } : {}),
     };
 
     if (!widget) {
@@ -120,7 +138,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       type: "widget",
       message: `Updated widget for agent ${agent.name}`,
       agentId: agent.id,
-      userId: admin.id,
+      userId: staff.id,
     });
 
     return json({
@@ -128,8 +146,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         id: widget.id,
         name: widget.name,
         enabled: widget.enabled,
-        config: parseConfig(widget.config),
-        agent: { id: agent.id, slug: agent.slug, name: agent.name },
+        config: nextConfig,
+        agent: {
+          id: agent.id,
+          slug: agent.slug,
+          name: agent.name,
+          asideText: agent.asideText,
+        },
       },
     });
   } catch (e) {

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { ListBar } from "@/components/PagedRows";
 
 type Task = {
   id: string;
@@ -24,6 +25,10 @@ const STATUS_RU: Record<string, string> = {
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [form, setForm] = useState({
     agentId: "",
     title: "",
@@ -31,12 +36,16 @@ export default function TasksPage() {
     runImmediately: true,
   });
 
-  async function load() {
+  async function load(nextPage = page, nextQuery = query) {
+    const params = new URLSearchParams({ page: String(nextPage), q: nextQuery });
     const [t, a] = await Promise.all([
-      fetch("/api/tasks").then((r) => r.json()),
+      fetch(`/api/tasks?${params}`).then((r) => r.json()),
       fetch("/api/agents").then((r) => r.json()),
     ]);
     setTasks(t.tasks ?? []);
+    setPage(t.page ?? nextPage);
+    setPages(t.pages ?? 1);
+    setTotal(t.total ?? 0);
     setAgents(a.agents ?? []);
     if (!form.agentId && a.agents?.[0]?.id) {
       setForm((f) => ({ ...f, agentId: a.agents[0].id }));
@@ -44,8 +53,12 @@ export default function TasksPage() {
   }
 
   useEffect(() => {
-    void load();
-  }, []);
+    const timer = setTimeout(() => {
+      void load(1, query);
+    }, 250);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
 
   async function createTask() {
     await fetch("/api/tasks", {
@@ -113,6 +126,19 @@ export default function TasksPage() {
           Создать задачу
         </button>
       </section>
+
+      <ListBar
+        query={query}
+        onQuery={setQuery}
+        page={page}
+        pages={pages}
+        total={total}
+        onPage={(next) => {
+          setPage(next);
+          void load(next, query);
+        }}
+        placeholder="Поиск по задачам"
+      />
 
       <div className="overflow-hidden rounded-2xl border border-violet-100 bg-white shadow-sm">
         <table className="w-full text-left text-sm">

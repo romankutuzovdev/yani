@@ -25,6 +25,57 @@ export async function requireAdmin(): Promise<SessionUser | NextResponse> {
   return session;
 }
 
+export async function requireOrg(): Promise<
+  | (SessionUser & { orgAgentId: string })
+  | NextResponse
+> {
+  const session = await requireAuth();
+  if (session instanceof NextResponse) return session;
+  const user = await prisma.user.findUnique({
+    where: { id: session.id },
+    select: { id: true, email: true, name: true, role: true, orgAgentId: true },
+  });
+  if (!user || user.role !== "ORG" || !user.orgAgentId) return error("Forbidden", 403);
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    orgAgentId: user.orgAgentId,
+  };
+}
+
+/** Admin, or an organization login opening only its own agent. */
+export async function requireAgentStaff(agentId: string): Promise<SessionUser | NextResponse> {
+  const session = await requireAuth();
+  if (session instanceof NextResponse) return session;
+  if (session.role === "ADMIN") return session;
+  if (session.role !== "ORG") return error("Forbidden", 403);
+  const user = await prisma.user.findUnique({
+    where: { id: session.id },
+    select: { orgAgentId: true },
+  });
+  if (!user?.orgAgentId || user.orgAgentId !== agentId) return error("Forbidden", 403);
+  return session;
+}
+
+/** Admin sees every agent. Organization sees only orgAgentId. */
+export async function requireCabinet(): Promise<
+  | (SessionUser & { orgAgentId: string | null })
+  | NextResponse
+> {
+  const session = await requireAuth();
+  if (session instanceof NextResponse) return session;
+  if (session.role === "ADMIN") return { ...session, orgAgentId: null };
+  if (session.role !== "ORG") return error("Forbidden", 403);
+  const user = await prisma.user.findUnique({
+    where: { id: session.id },
+    select: { orgAgentId: true },
+  });
+  if (!user?.orgAgentId) return error("Forbidden", 403);
+  return { ...session, orgAgentId: user.orgAgentId };
+}
+
 export async function resolveApiKey(authHeader: string | null) {
   if (!authHeader?.startsWith("Bearer ")) return null;
   const raw = authHeader.slice(7).trim();
@@ -63,8 +114,9 @@ export async function writeLog(opts: {
         meta: JSON.stringify(opts.meta ?? {}),
       },
     });
-  } catch {
-    // never break request path on logging failure
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : "log write failed";
+    console.error(`[log] ${opts.level ?? "INFO"} ${opts.type}: ${reason}`);
   }
 }
 

@@ -12,6 +12,7 @@ enum Role {
   ADMIN
   USER
   API_CLIENT
+  ORG
 }
 
 enum AgentStatus {
@@ -75,9 +76,18 @@ model User {
   passwordHash String
   name         String
   role         Role      @default(USER)
+  /** Organization cabinet: the one agent this login may edit. */
+  orgAgentId   String?
+  /** Shown in the organization cabinet. Filled when access is issued. */
+  orgName      String    @default("")
+  orgUnp       String    @default("")
+  /** Tariff the admin typed for this organization. Empty name means no tariff. */
+  planName         String @default("")
+  planMonthlyPrice Float  @default(0)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   agents       Agent[]
+  orgAgent     Agent?    @relation("OrgCabinet", fields: [orgAgentId], references: [id], onDelete: SetNull)
   apiKeys      ApiKey[]
   memories     Memory[]  @relation("UserMemories")
   logs         SystemLog[]
@@ -89,7 +99,11 @@ model Agent {
   slug           String        @unique
   description    String        @default("")
   logoUrl        String        @default("")
+  /** Square icon used when the chat is installed on a phone home screen. */
+  homeIconUrl    String        @default("")
   greeting       String        @default("")
+  /** Optional caption shown beside the character in the public chat. */
+  asideText      String        @default("")
   personality    String        @default("friendly")
   role           String        @default("AI assistant")
   communicationStyle String    @default("clear and helpful")
@@ -113,6 +127,8 @@ model Agent {
   status         AgentStatus   @default(IDLE)
   statusMessage  String        @default("")
   enabled        Boolean       @default(true)
+  /** Opens yani.by and /chat when the URL has no slug. Only one agent at a time. */
+  isPrimary      Boolean       @default(false)
   ownerId        String
   characterId    String?       @unique
   createdAt      DateTime      @default(now())
@@ -129,6 +145,9 @@ model Agent {
   usage      UsageRecord[]
   logs       SystemLog[]
   chats      ChatMessage[]
+  orgUsers   User[]        @relation("OrgCabinet")
+  ipBlocks   AgentIpBlock[]
+  docs       AgentDoc[]
 
   @@index([ownerId])
   @@index([status])
@@ -183,6 +202,24 @@ model Skill {
   agents       AgentSkill[]
 
   @@index([sortOrder])
+}
+
+model AgentDoc {
+  id        String   @id @default(cuid())
+  agentId   String
+  title     String
+  fileName  String
+  url       String   @default("")
+  mimeType  String   @default("text/plain")
+  /** preview — текст в окне чата, direct — файл сразу в новой вкладке */
+  openMode  String   @default("preview")
+  text      String   @default("")
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, sortOrder])
 }
 
 model AgentSkill {
@@ -314,6 +351,21 @@ model VisitorRequest {
 
   @@index([createdAt])
   @@index([ip, createdAt])
+  @@index([agentId, createdAt])
+}
+
+/** IP closed for one agent by its organization. Admin and bot blocks stay global. */
+model AgentIpBlock {
+  id        String   @id @default(cuid())
+  agentId   String
+  ip        String
+  reason    String   @default("")
+  createdAt DateTime @default(now())
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, ip])
+  @@index([agentId])
 }
 
 model IpBlock {
