@@ -43,15 +43,31 @@ function recognitionCtor(): (new () => BrowserRecognition) | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+function isAndroid() {
+  if (typeof navigator === "undefined") return false;
+  return /Android/i.test(navigator.userAgent || "");
+}
+
+function voiceErrorText(code?: string) {
+  if (code === "not-allowed" || code === "service-not-allowed") {
+    return "Разрешите микрофон для сайта в настройках браузера";
+  }
+  if (code === "audio-capture") return "Микрофон не найден";
+  if (code === "network") return "Для голоса на Android нужен интернет (распознавание Chrome)";
+  return "Голосовой ввод не запустился";
+}
+
 /** Browser speech-to-text. Audio stays on the device; nothing is sent to Yani. */
 export function VoiceInputButton({
   disabled,
   value,
   onChange,
+  onError,
 }: {
   disabled?: boolean;
   value: string;
   onChange: (text: string) => void;
+  onError?: (message: string) => void;
 }) {
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
@@ -78,7 +94,7 @@ export function VoiceInputButton({
     setListening(false);
   }, [disabled]);
 
-  function toggle() {
+  async function toggle() {
     if (listening) {
       wantRef.current = false;
       recRef.current?.stop();
@@ -87,9 +103,20 @@ export function VoiceInputButton({
     }
     const Ctor = recognitionCtor();
     if (!Ctor) return;
+    const android = isAndroid();
+    if (android && navigator.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+      } catch {
+        onError?.(voiceErrorText("not-allowed"));
+        return;
+      }
+    }
     const rec = new Ctor();
     rec.lang = "ru-RU";
-    rec.continuous = true;
+    // Android Chrome ignores continuous and ends the session immediately if it is on.
+    rec.continuous = !android;
     rec.interimResults = true;
     committedRef.current = valueRef.current;
     interimRef.current = "";
@@ -128,6 +155,7 @@ export function VoiceInputButton({
       if (ev.error === "aborted" || ev.error === "no-speech") return;
       wantRef.current = false;
       setListening(false);
+      onError?.(voiceErrorText(ev.error));
     };
     rec.onend = () => {
       interimRef.current = "";
@@ -137,12 +165,17 @@ export function VoiceInputButton({
         return;
       }
       committedRef.current = valueRef.current;
-      try {
-        rec.start();
-      } catch {
-        wantRef.current = false;
-        setListening(false);
-      }
+      // Android ends after each phrase. Restart shortly after, still from the same tap.
+      const delay = android ? 250 : 0;
+      window.setTimeout(() => {
+        if (!wantRef.current) return;
+        try {
+          rec.start();
+        } catch {
+          wantRef.current = false;
+          setListening(false);
+        }
+      }, delay);
     };
     recRef.current = rec;
     wantRef.current = true;
@@ -160,7 +193,7 @@ export function VoiceInputButton({
   return (
     <button
       type="button"
-      onClick={toggle}
+      onClick={() => void toggle()}
       disabled={disabled}
       aria-pressed={listening}
       aria-label={listening ? "Остановить голосовой ввод" : "Голосовой ввод"}

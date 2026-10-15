@@ -187,10 +187,11 @@ model Skill {
   description  String
   iconUrl      String   @default("")
   systemPrompt String   @default("")
-  /** Attached Word (.docx) source for the skill */
+  /** Legacy / aggregate: first file URL or empty */
   documentUrl  String   @default("")
+  /** Aggregate label for UI and prompts, e.g. "3 файла" or names */
   documentName String   @default("")
-  /** Extracted plain text from the Word file — injected into the agent prompt */
+  /** Concatenated text from SkillDocument rows — injected into the agent prompt */
   documentText String   @default("")
   model        String   @default("")
   tools        String   @default("[]")
@@ -200,8 +201,25 @@ model Skill {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   agents       AgentSkill[]
+  documents    SkillDocument[]
 
   @@index([sortOrder])
+}
+
+/** One attached source file for a skill (Word / txt / md). Max 15 per skill. */
+model SkillDocument {
+  id        String   @id @default(cuid())
+  skillId   String
+  fileName  String
+  url       String   @default("")
+  mimeType  String   @default("text/plain")
+  text      String   @default("")
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@index([skillId, sortOrder])
 }
 
 model AgentDoc {

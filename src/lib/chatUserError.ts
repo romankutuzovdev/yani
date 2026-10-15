@@ -9,11 +9,11 @@ const KEEP_PREFIX =
 export function toChatUserMessage(raw?: string | null): string {
   const text = (raw ?? "").trim();
   if (!text) return CHAT_UNAVAILABLE;
-  if (KEEP_PREFIX.test(text) && !/vibecode|stream error|invalid_request|\{"error"/i.test(text)) {
+  if (KEEP_PREFIX.test(text) && !/vibecode|hoster|stream error|invalid_request|\{"error"/i.test(text)) {
     return text;
   }
   if (
-    /vibecode|deepseek|openai|anthropic|gemini|stream error|invalid[_ ]request|ECONN|ENOTFOUND|ETIMEDOUT|fetch failed|API key|Unauthorized|rate.?limit|timeout|socket|\{"error"|error \d{3}/i.test(
+    /vibecode|hoster|deepseek|openai|anthropic|gemini|qwen|stream error|invalid[_ ]request|ECONN|ENOTFOUND|ETIMEDOUT|fetch failed|API key|Unauthorized|rate.?limit|timeout|socket|\{"error"|error \d{3}/i.test(
       text,
     )
   ) {

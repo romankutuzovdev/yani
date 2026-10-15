@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { asStringArray, jsonString } from "@/lib/utils";
 import {
   createLLMProvider,
+  providerForModel,
   type LLMOptions,
   type LLMProvider,
   type LLMResponse,
@@ -173,11 +174,19 @@ function toToolDefs(tools: AgentTool[]): LLMToolDefinition[] {
 
 export class AgentEngine {
   private llm: LLMProvider;
+  /** Tests inject one client. Production picks vibecode vs hoster per model id. */
+  private readonly llmOverride: LLMProvider | null;
 
   constructor(llm?: LLMProvider) {
     ensureToolsRegistered();
     registerMemoryTool();
+    this.llmOverride = llm ?? null;
     this.llm = llm ?? createLLMProvider();
+  }
+
+  private llmFor(modelId: string): LLMProvider {
+    if (this.llmOverride) return this.llmOverride;
+    return createLLMProvider(providerForModel(modelId));
   }
 
   /** Streams one model turn; on upstream outage tries DeepSeek → Gemini 3 Flash → Grok. */
@@ -198,8 +207,9 @@ export class AgentEngine {
       let model = modelId;
       let emitted = false;
 
+      const llm = this.llmFor(modelId);
       try {
-        for await (const chunk of this.llm.stream(messages, { ...options, model: modelId })) {
+        for await (const chunk of llm.stream(messages, { ...options, model: modelId })) {
           if (chunk.content) {
             content += chunk.content;
             emitted = true;
@@ -242,7 +252,7 @@ export class AgentEngine {
           toolCalls: toolCalls.length ? toolCalls : undefined,
           usage,
           model,
-          provider: this.llm.name,
+          provider: llm.name,
         };
       } catch (e) {
         lastError = e;

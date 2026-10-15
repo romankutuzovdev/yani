@@ -204,20 +204,34 @@
       var recoveries = 0;
       var recovering = false;
       var verifyTimers = [];
+      var softTimers = [];
       var NEAR_END_SEC = 0.06;
       var LEFT_START_SEC = 0.2;
-      var HARD_AWAY_MS = 1500;
-      var STANDALONE_HARD_AWAY_MS = 300;
-      var STANDALONE_UNSEEN_MS = 5000;
+      var MOBILE_HARD_AWAY_MS = 300;
+      var MOBILE_UNSEEN_MS = 5000;
       var seenTimer = setInterval(function () {
         if (document.visibilityState === "visible") lastSeen = Date.now();
       }, 1000);
-      function isStandaloneApp() {
+      function isIosDevice() {
         try {
+          var ua = window.navigator.userAgent || "";
+          if (/iPhone|iPad|iPod/i.test(ua)) return true;
+          return window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1;
+        } catch (e) {
+          return false;
+        }
+      }
+      /** Phone/tablet only — Mac desktop/PWA must soft-wake (hard reload = square). */
+      function isPhoneClass() {
+        try {
+          if (isIosDevice()) return true;
+          var ua = window.navigator.userAgent || "";
+          if (/Android/i.test(ua)) return true;
+          if (/Macintosh|Windows|Linux/i.test(ua) && !/Mobile|Android/i.test(ua)) return false;
           return (
-            (window.matchMedia &&
-              window.matchMedia("(display-mode: standalone)").matches) ||
-            window.navigator.standalone === true
+            window.matchMedia &&
+            window.matchMedia("(pointer: coarse)").matches &&
+            window.navigator.maxTouchPoints > 0
           );
         } catch (e) {
           return false;
@@ -228,9 +242,10 @@
         if (play && play.catch) play.catch(function () {});
       }
       function clearVerify() {
-        while (verifyTimers.length) {
-          clearTimeout(verifyTimers.pop());
-        }
+        while (verifyTimers.length) clearTimeout(verifyTimers.pop());
+      }
+      function clearSoft() {
+        while (softTimers.length) clearTimeout(softTimers.pop());
       }
       function looksAlive() {
         return (
@@ -240,31 +255,42 @@
           video.videoWidth > 0
         );
       }
-      function standaloneWasAway() {
-        if (!isStandaloneApp()) return false;
-        var now = Date.now();
-        if (hiddenAt > 0 && now - hiddenAt >= STANDALONE_HARD_AWAY_MS) return true;
-        return now - lastSeen >= STANDALONE_UNSEEN_MS;
+      function decoderDead() {
+        return (
+          video.ended ||
+          video.readyState < 2 ||
+          video.videoWidth === 0 ||
+          video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE
+        );
       }
-      function needsHardRecover(force) {
-        if (video.ended) return true;
-        if (video.readyState < 2) return true;
-        if (video.videoWidth === 0) return true;
-        if (force && standaloneWasAway()) return true;
-        if (!force || hiddenAt <= 0) return false;
-        return Date.now() - hiddenAt >= HARD_AWAY_MS;
+      function phoneWasAway() {
+        if (!isPhoneClass()) return false;
+        var now = Date.now();
+        if (hiddenAt > 0 && now - hiddenAt >= MOBILE_HARD_AWAY_MS) return true;
+        return now - lastSeen >= MOBILE_UNSEEN_MS;
+      }
+      function needsHardRecover() {
+        if (video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) return true;
+        if (!isPhoneClass()) return false;
+        if (decoderDead()) return true;
+        return phoneWasAway();
       }
       function scheduleVerify() {
         clearVerify();
-        [350, 1200].forEach(function (ms) {
+        [200, 600, 1400].forEach(function (ms) {
           verifyTimers.push(
             setTimeout(function () {
               if (document.visibilityState === "hidden") return;
+              refillAfterShow();
               if (looksAlive()) {
                 recoveries = 0;
                 return;
               }
-              hardRecover();
+              if (needsHardRecover()) {
+                hardRecover();
+                return;
+              }
+              playSafe();
             }, ms),
           );
         });
@@ -302,14 +328,7 @@
         }, 4000);
         var attempt = video.play();
         if (attempt && attempt.then) {
-          attempt.then(
-            function () {
-              scheduleVerify();
-            },
-            function () {
-              scheduleVerify();
-            },
-          );
+          attempt.then(function () { scheduleVerify(); }, function () { scheduleVerify(); });
         } else {
           scheduleVerify();
         }
@@ -353,6 +372,8 @@
         video.style.transform = "none";
         video.style.setProperty("width", size + "px", "important");
         video.style.setProperty("height", size + "px", "important");
+        video.style.setProperty("min-width", size + "px", "important");
+        video.style.setProperty("min-height", size + "px", "important");
         video.style.setProperty("object-fit", "contain", "important");
         video.style.setProperty("object-position", "center center", "important");
       }
@@ -373,53 +394,49 @@
           }
         });
       }
-      function wake(force) {
+      function softWake() {
         if (document.visibilityState === "hidden") return;
-        if (force && standaloneWasAway()) recoveries = 0;
         refillAfterShow();
-        if (needsHardRecover(!!force)) {
+        if (video.ended) onEnded();
+        else playSafe();
+        scheduleVerify();
+        hiddenAt = 0;
+        lastSeen = Date.now();
+      }
+      function wake() {
+        if (document.visibilityState === "hidden") return;
+        if (needsHardRecover()) {
+          if (phoneWasAway()) recoveries = 0;
+          refillAfterShow();
           hardRecover();
           hiddenAt = 0;
           lastSeen = Date.now();
           return;
         }
-        if (video.ended) {
-          onEnded();
-          scheduleVerify();
-          hiddenAt = 0;
-          return;
-        }
-        var attempt = video.play();
-        if (attempt && attempt.then) {
-          attempt.then(
-            function () {
-              scheduleVerify();
-            },
-            function () {
-              scheduleVerify();
-            },
-          );
-        } else {
-          scheduleVerify();
-        }
-        hiddenAt = 0;
-        lastSeen = Date.now();
+        softWake();
       }
-      function wakeStandaloneSoon() {
-        if (!isStandaloneApp()) {
-          wake(false);
-          return;
-        }
-        wake(true);
-        setTimeout(function () {
-          wake(true);
-        }, 500);
+      function wakeSoon() {
+        clearSoft();
+        wake();
+        [80, 250, 700].forEach(function (ms) {
+          softTimers.push(
+            setTimeout(function () {
+              if (document.visibilityState === "hidden") return;
+              refillAfterShow();
+              if (needsHardRecover()) {
+                hardRecover();
+                return;
+              }
+              playSafe();
+            }, ms),
+          );
+        });
       }
       function onShow() {
-        wakeStandaloneSoon();
+        wakeSoon();
       }
       function onPageShow() {
-        wakeStandaloneSoon();
+        wakeSoon();
       }
       function onFreeze() {
         hiddenAt = Date.now();
@@ -427,7 +444,11 @@
       }
       function onVideoError() {
         if (recovering || document.visibilityState === "hidden") return;
-        if (!isStandaloneApp()) return;
+        if (!isPhoneClass()) {
+          refillAfterShow();
+          playSafe();
+          return;
+        }
         hardRecover();
       }
       function onVisibility() {
@@ -436,7 +457,7 @@
           clearVerify();
           return;
         }
-        wakeStandaloneSoon();
+        wakeSoon();
       }
       function onPause() {
         if (document.visibilityState === "hidden") return;
@@ -464,6 +485,7 @@
       window.addEventListener("focus", onShow);
       fabCleanup = function () {
         clearVerify();
+        clearSoft();
         clearInterval(seenTimer);
         video.removeEventListener("timeupdate", rewindNearEnd);
         video.removeEventListener("ended", onEnded);

@@ -4,34 +4,45 @@ import { useEffect, type RefObject } from "react";
 
 const NEAR_END_SEC = 0.06;
 const LEFT_START_SEC = 0.2;
-/** After this long in background, always rebuild the decoder. */
-const HARD_AWAY_MS = 1500;
-/** Installed PWA (iOS) drops frames sooner — reload sooner. */
-const STANDALONE_HARD_AWAY_MS = 300;
-/**
- * iOS can freeze a PWA without a visibility "hidden" event. If the page
- * has not been seen for this long, the decoder is treated as gone.
- */
-const STANDALONE_UNSEEN_MS = 5000;
+/** Phone: rebuild decoder after this long in background. */
+const MOBILE_HARD_AWAY_MS = 300;
+const MOBILE_UNSEEN_MS = 5000;
 
-function isStandaloneApp() {
+function isIosDevice() {
   try {
-    const nav = window.navigator as Navigator & { standalone?: boolean };
-    return (
-      window.matchMedia("(display-mode: standalone)").matches || nav.standalone === true
-    );
+    const ua = window.navigator.userAgent || "";
+    if (/iPhone|iPad|iPod/i.test(ua)) return true;
+    // iPadOS reports as MacIntel with touch
+    return window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1;
   } catch {
     return false;
   }
 }
 
 /**
- * macOS Safari often ignores native `loop` and parks on the last frame.
- * Seek to 0 once, only in the last ~0.06s, then wait until playback has
- * left the start. Never seek a clip that is still in the middle.
+ * Real phone/tablet only. Mac desktop and Mac installed PWA must stay soft —
+ * hard src reload paints the tiny square after tab/app switch.
+ */
+function isPhoneClass() {
+  try {
+    if (isIosDevice()) return true;
+    const ua = window.navigator.userAgent || "";
+    if (/Android/i.test(ua)) return true;
+    // Desktop Mac/Windows with trackpad: never hard-reload.
+    if (/Macintosh|Windows|Linux/i.test(ua) && !/Mobile|Android/i.test(ua)) return false;
+    return window.matchMedia("(pointer: coarse)").matches && window.navigator.maxTouchPoints > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Loop: seek to 0 only in the last ~0.06s (Mac Safari ignores native loop).
  *
- * iOS installed PWA: after a long background the decoder can go blank while
- * readyState still looks fine — force load()+play() on resume, then verify.
+ * Desktop Mac (Safari/Chrome/PWA): after tab switch ONLY pin the box + play().
+ * Reloading src paints a tiny intrinsic square — never do that on desktop.
+ *
+ * iPhone / Android: after background, rebuild decoder with load().
  */
 export function bindHeroVideo(video: HTMLVideoElement) {
   video.loop = true;
@@ -48,6 +59,7 @@ export function bindHeroVideo(video: HTMLVideoElement) {
   let recoveries = 0;
   let recovering = false;
   const verifyTimers: number[] = [];
+  const softTimers: number[] = [];
 
   const seenTimer = window.setInterval(() => {
     if (document.visibilityState === "visible") lastSeen = Date.now();
@@ -65,11 +77,6 @@ export function bindHeroVideo(video: HTMLVideoElement) {
     return video.clientWidth < size * 0.8 || video.clientHeight < size * 0.8;
   }
 
-  /**
-   * macOS Safari paints a backgrounded <video> at its intrinsic size (a small
-   * square). Pin it to the circle in pixels. Do not reload the file: that
-   * resets the picture and the position.
-   */
   function fillFrame() {
     if (document.visibilityState === "hidden") return;
     const size = circleSize();
@@ -86,6 +93,8 @@ export function bindHeroVideo(video: HTMLVideoElement) {
     video.style.setProperty("height", `${size}px`, "important");
     video.style.setProperty("max-width", "none", "important");
     video.style.setProperty("max-height", "none", "important");
+    video.style.setProperty("min-width", `${size}px`, "important");
+    video.style.setProperty("min-height", `${size}px`, "important");
     video.style.setProperty("object-fit", "contain", "important");
     video.style.setProperty("object-position", "center center", "important");
     if (parent && getComputedStyle(parent).position !== "static") {
@@ -114,6 +123,13 @@ export function bindHeroVideo(video: HTMLVideoElement) {
   function clearVerify() {
     while (verifyTimers.length) {
       const id = verifyTimers.pop();
+      if (id != null) window.clearTimeout(id);
+    }
+  }
+
+  function clearSoft() {
+    while (softTimers.length) {
+      const id = softTimers.pop();
       if (id != null) window.clearTimeout(id);
     }
   }
@@ -162,21 +178,31 @@ export function bindHeroVideo(video: HTMLVideoElement) {
     );
   }
 
-  function standaloneWasAway() {
-    if (!isStandaloneApp()) return false;
-    const now = Date.now();
-    if (hiddenAt > 0 && now - hiddenAt >= STANDALONE_HARD_AWAY_MS) return true;
-    return now - lastSeen >= STANDALONE_UNSEEN_MS;
-  }
-
-  function needsHardRecover(force: boolean) {
+  function decoderDead() {
     if (video.ended) return true;
     if (video.readyState < 2) return true;
     if (video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) return true;
     if (video.videoWidth === 0) return true;
-    if (force && standaloneWasAway()) return true;
-    if (!force || hiddenAt <= 0) return false;
-    return Date.now() - hiddenAt >= HARD_AWAY_MS;
+    return false;
+  }
+
+  function phoneWasAway() {
+    if (!isPhoneClass()) return false;
+    const now = Date.now();
+    if (hiddenAt > 0 && now - hiddenAt >= MOBILE_HARD_AWAY_MS) return true;
+    return now - lastSeen >= MOBILE_UNSEEN_MS;
+  }
+
+  /**
+   * Hard reload ONLY on phone after background / dead decoder.
+   * Desktop Mac: NEVER — even if readyState/videoWidth dip after tab switch.
+   * That dip used to trigger hardRecover → tiny square.
+   */
+  function needsHardRecover() {
+    if (video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) return true;
+    if (!isPhoneClass()) return false;
+    if (decoderDead()) return true;
+    return phoneWasAway();
   }
 
   function hardRecover() {
@@ -202,7 +228,6 @@ export function bindHeroVideo(video: HTMLVideoElement) {
     video.addEventListener("loadeddata", restore);
     try {
       video.pause();
-      // Same src again is a no-op on iOS. Drop it so the decoder is rebuilt.
       video.removeAttribute("src");
       video.load();
       if (src) video.src = src;
@@ -219,7 +244,12 @@ export function bindHeroVideo(video: HTMLVideoElement) {
 
   function onVideoError() {
     if (recovering || document.visibilityState === "hidden") return;
-    if (!isStandaloneApp()) return;
+    // Mac: never nuke src on error — soft retry. Phone may hard-reload.
+    if (!isPhoneClass()) {
+      refillAfterShow();
+      void video.play().catch(() => undefined);
+      return;
+    }
     hardRecover();
   }
 
@@ -229,72 +259,86 @@ export function bindHeroVideo(video: HTMLVideoElement) {
       scheduleVerify();
       return;
     }
-    // Do not hardRecover in the same tick — iOS often reports readyState 0
-    // for a moment after load(); verify timers check again shortly.
     void attempt.then(() => scheduleVerify()).catch(() => scheduleVerify());
   }
 
   function scheduleVerify() {
     clearVerify();
-    for (const ms of [350, 1200]) {
+    for (const ms of [200, 600, 1400]) {
       verifyTimers.push(
         window.setTimeout(() => {
           if (document.visibilityState === "hidden") return;
+          refillAfterShow();
           if (looksAlive()) {
             recoveries = 0;
-            if (boxIsTiny()) refillAfterShow();
+            if (boxIsTiny()) kickLayer();
             return;
           }
-          hardRecover();
+          if (needsHardRecover()) {
+            hardRecover();
+            return;
+          }
+          // Desktop: soft retry only
+          void video.play().catch(() => undefined);
+          if (boxIsTiny()) kickLayer();
         }, ms),
       );
     }
   }
 
-  function wake(force = false) {
+  /** Pin + play without touching src. This is the Mac-safe path. */
+  function softWake() {
     if (document.visibilityState === "hidden") return;
-    if (force && standaloneWasAway()) recoveries = 0;
     refillAfterShow();
-    if (needsHardRecover(force)) {
+    if (video.ended) {
+      onEnded();
+    } else {
+      void video.play().catch(() => undefined);
+    }
+    scheduleVerify();
+    hiddenAt = 0;
+    lastSeen = Date.now();
+  }
+
+  function wake() {
+    if (document.visibilityState === "hidden") return;
+    if (needsHardRecover()) {
+      if (phoneWasAway()) recoveries = 0;
+      refillAfterShow();
       hardRecover();
       hiddenAt = 0;
       lastSeen = Date.now();
       return;
     }
-    if (video.ended) {
-      onEnded();
-      scheduleVerify();
-      hiddenAt = 0;
-      return;
-    }
-    const attempt = video.play();
-    if (!attempt || typeof attempt.then !== "function") {
-      scheduleVerify();
-      hiddenAt = 0;
-      return;
-    }
-    void attempt.then(() => scheduleVerify()).catch(() => scheduleVerify());
-    hiddenAt = 0;
-    lastSeen = Date.now();
+    softWake();
   }
 
-  function wakeStandaloneSoon() {
-    if (!isStandaloneApp()) {
-      wake(false);
-      return;
+  function wakeSoon() {
+    clearSoft();
+    wake();
+    // Re-pin after Safari finishes layout (Mac often paints tiny first).
+    for (const ms of [80, 250, 700]) {
+      softTimers.push(
+        window.setTimeout(() => {
+          if (document.visibilityState === "hidden") return;
+          refillAfterShow();
+          if (boxIsTiny()) kickLayer();
+          if (needsHardRecover()) {
+            hardRecover();
+            return;
+          }
+          void video.play().catch(() => undefined);
+        }, ms),
+      );
     }
-    wake(true);
-    // iOS often reports the page hidden for a moment after resume.
-    window.setTimeout(() => wake(true), 500);
   }
 
   function onShow() {
-    // Focus while the PWA was frozen: visibility "hidden" often never fired.
-    wakeStandaloneSoon();
+    wakeSoon();
   }
 
   function onPageShow() {
-    wakeStandaloneSoon();
+    wakeSoon();
   }
 
   function onFreeze() {
@@ -308,9 +352,7 @@ export function bindHeroVideo(video: HTMLVideoElement) {
       clearVerify();
       return;
     }
-    // Mac Safari only needs the box put back and play() resumed.
-    // Reloading the file is what turns the hero into a small square.
-    wakeStandaloneSoon();
+    wakeSoon();
   }
 
   function onPause() {
@@ -343,10 +385,11 @@ export function bindHeroVideo(video: HTMLVideoElement) {
   document.addEventListener("resume", onShow as EventListener);
   window.addEventListener("pageshow", onPageShow);
   window.addEventListener("focus", onShow);
-  onShow();
+  wakeSoon();
 
   return () => {
     clearVerify();
+    clearSoft();
     window.clearInterval(seenTimer);
     video.removeEventListener("timeupdate", rewindNearEnd);
     video.removeEventListener("ended", onEnded);

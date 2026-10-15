@@ -64,6 +64,9 @@ export default function SettingsPage() {
   const [model, setModel] = useState("");
   const [saved, setSaved] = useState("");
   const [message, setMessage] = useState("");
+  const [provider, setProvider] = useState("vibecode");
+  const [providerOptions, setProviderOptions] = useState<Array<{ id: string; label: string }>>([]);
+  const [providerNote, setProviderNote] = useState("");
   const [usage, setUsage] = useState<Usage | null>(null);
   const [usageError, setUsageError] = useState("");
   const [seo, setSeo] = useState<SiteSeo>(emptySeo);
@@ -77,6 +80,12 @@ export default function SettingsPage() {
         .then((d) => {
           setModel(d.model ?? "");
           setSaved(d.model ?? "");
+        });
+      void fetch("/api/llm/provider")
+        .then((r) => r.json())
+        .then((d) => {
+          setProvider(d.provider ?? "vibecode");
+          setProviderOptions(d.options ?? []);
         });
       void fetch("/api/llm/usage")
         .then(async (r) => {
@@ -110,6 +119,34 @@ export default function SettingsPage() {
     }
     setSaved(data.model);
     setMessage("Модель по умолчанию сохранена. У каждого агента своя модель в его карточке.");
+  }
+
+  async function saveProvider(next: string) {
+    setProviderNote("");
+    setProvider(next);
+    const res = await fetch("/api/llm/provider", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: next,
+        defaultModel: next === "hoster" ? "qwen3.8-27b" : undefined,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setProviderNote(data.error ?? "Не удалось переключить");
+      return;
+    }
+    setProvider(data.provider ?? next);
+    if (next === "hoster") {
+      setModel("qwen3.8-27b");
+      setSaved("qwen3.8-27b");
+    }
+    setProviderNote(
+      next === "hoster"
+        ? "Сейчас ответы идут через hoster.by AI (qwen3.8-27b)."
+        : `Сейчас провайдер: ${data.provider ?? next}`,
+    );
   }
 
   async function saveSeo() {
@@ -253,6 +290,36 @@ export default function SettingsPage() {
       {!orgMode && (
       <>
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
+        <h2 className="font-medium text-slate-900">Провайдер ИИ</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          vibecode.moe или ИИ hoster.by. Ключ hoster берётся из HOSTER_API_KEY на сервере.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {(providerOptions.length
+            ? providerOptions
+            : [
+                { id: "vibecode", label: "vibecode.moe" },
+                { id: "hoster", label: "hoster.by AI" },
+              ]
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => void saveProvider(opt.id)}
+              className={`rounded-xl px-4 py-2 text-sm font-medium ${
+                provider === opt.id
+                  ? "bg-violet-600 text-white"
+                  : "border border-violet-200 bg-white text-slate-700"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {providerNote && <p className="mt-2 text-sm text-slate-600">{providerNote}</p>}
+      </section>
+
+      <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="font-medium text-slate-900">Какую модель использовать</h2>
         <p className="mt-1 text-sm text-slate-500">
           Это модель для новых агентов. Уже созданным агентам модель задаётся отдельно на странице агента.
@@ -299,7 +366,7 @@ export default function SettingsPage() {
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="mb-1 font-medium text-slate-900">Потрачено по моделям</h2>
         <p className="mb-4 text-sm text-slate-500">
-          Сумма считается по ценам vibecode: входные и выходные токены каждого запроса.
+          Сумма считается по ценам каталога провайдера: входные и выходные токены каждого запроса.
         </p>
         <PagedRows
           items={usage?.byModel ?? []}

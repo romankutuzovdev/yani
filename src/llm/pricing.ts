@@ -1,12 +1,9 @@
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
-import path from "path";
 import { formatExact, formatUsd } from "@/lib/money";
 import { defaultLLMModel, listLLMModels } from "./index";
+import { readLLMSettings, writeLLMSettings } from "./runtimeSettings";
 import type { LLMModelInfo, ModelPricing } from "./types";
 
 export { formatUsd };
-
-const SETTINGS_FILE = path.join(process.cwd(), "prisma", "data", "llm-settings.json");
 
 type UsageSlice = {
   inputTokens: number;
@@ -16,26 +13,19 @@ type UsageSlice = {
 
 let priceCache: { at: number; models: LLMModelInfo[] } | null = null;
 
+export function clearPricedModelsCache() {
+  priceCache = null;
+}
+
 export function readDefaultModel(): string {
-  try {
-    const raw = JSON.parse(readFileSync(SETTINGS_FILE, "utf8")) as { defaultModel?: string };
-    if (raw.defaultModel?.trim()) return raw.defaultModel.trim();
-  } catch {
-    // file missing until the admin picks a model
-  }
+  const raw = readLLMSettings().defaultModel?.trim();
+  if (raw) return raw;
   return defaultLLMModel();
 }
 
 export function writeDefaultModel(model: string) {
-  mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
-  let current: Record<string, unknown> = {};
-  try {
-    current = JSON.parse(readFileSync(SETTINGS_FILE, "utf8")) as Record<string, unknown>;
-  } catch {
-    current = {};
-  }
-  current.defaultModel = model.trim();
-  writeFileSync(SETTINGS_FILE, JSON.stringify(current, null, 2));
+  writeLLMSettings({ defaultModel: model });
+  priceCache = null;
 }
 
 export async function getPricedModels(): Promise<LLMModelInfo[]> {

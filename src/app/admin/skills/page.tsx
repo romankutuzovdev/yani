@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Sparkles, Trash2 } from "lucide-react";
 import { ModelSelect } from "@/components/ModelSelect";
 import { ListBar } from "@/components/PagedRows";
+import { SkillDocs } from "@/components/SkillDocs";
 
 type Skill = {
   id: string;
@@ -55,7 +56,7 @@ export default function SkillsPage() {
   const apiBase = orgMode ? "/api/org/skills" : "/api/skills";
   const [skills, setSkills] = useState<Skill[]>([]);
   const [form, setForm] = useState(emptyForm);
-  const [createFile, setCreateFile] = useState<File | null>(null);
+  const [createFiles, setCreateFiles] = useState<File[]>([]);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [edit, setEdit] = useState(emptyForm);
@@ -111,24 +112,40 @@ export default function SkillsPage() {
         return;
       }
       const skillId = typeof data.skill?.id === "string" ? data.skill.id : "";
-      const file = createFile;
+      const files = createFiles.slice(0, 15);
       setForm(emptyForm);
-      setCreateFile(null);
+      setCreateFiles([]);
       setFileInputKey((key) => key + 1);
-      if (file && skillId) {
+      if (files.length && skillId) {
         setUploadingSkillId(skillId);
-        setUploadPercent(0);
-        const docRes = await postFile(`${apiBase}/${skillId}/document`, file, setUploadPercent);
-        if (!docRes.ok) {
+        let attached = 0;
+        let failed = "";
+        for (let i = 0; i < files.length; i += 1) {
+          const file = files[i]!;
+          setUploadPercent(0);
+          setMessage(`Загрузка ${i + 1} из ${files.length}: ${file.name}`);
+          const docRes = await postFile(`${apiBase}/${skillId}/docs`, file, setUploadPercent);
+          if (!docRes.ok) {
+            failed =
+              typeof docRes.data.error === "string"
+                ? docRes.data.error
+                : `не загрузился ${file.name}`;
+            break;
+          }
+          attached += 1;
+        }
+        if (failed) {
           setMessage(
-            typeof docRes.data.error === "string"
-              ? `Навык создан, но документ не загрузился: ${docRes.data.error}`
-              : "Навык создан, но документ не загрузился",
+            attached
+              ? `Навык создан, прикреплено ${attached} из ${files.length}. ${failed}`
+              : `Навык создан, но документ не загрузился: ${failed}`,
           );
           await load();
           return;
         }
-        setMessage("Навык создан, документ прикреплён");
+        setMessage(
+          attached > 1 ? `Навык создан, прикреплено файлов: ${attached}` : "Навык создан, документ прикреплён",
+        );
       } else {
         setMessage("Навык создан");
       }
@@ -173,28 +190,6 @@ export default function SkillsPage() {
     await load();
   }
 
-  async function uploadDocument(id: string, file: File) {
-    setBusy(true);
-    setMessage("");
-    setUploadingSkillId(id);
-    setUploadPercent(0);
-    try {
-      const res = await postFile(`${apiBase}/${id}/document`, file, setUploadPercent);
-      if (!res.ok) {
-        setMessage(
-          typeof res.data.error === "string" ? res.data.error : "Не удалось загрузить документ",
-        );
-        return;
-      }
-      setMessage("Документ загружен");
-      await load();
-    } finally {
-      setBusy(false);
-      setUploadPercent(null);
-      setUploadingSkillId(null);
-    }
-  }
-
   async function uploadIcon(id: string, file: File) {
     setBusy(true);
     setMessage("");
@@ -229,23 +224,6 @@ export default function SkillsPage() {
         return;
       }
       setMessage("Иконка убрана");
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function removeDocument(id: string) {
-    setBusy(true);
-    setMessage("");
-    try {
-      const res = await fetch(`${apiBase}/${id}/document`, { method: "DELETE" });
-      const data = await res.json();
-      if (!res.ok) {
-        setMessage(data.error ?? "Не удалось убрать документ");
-        return;
-      }
-      setMessage("Документ убран");
       await load();
     } finally {
       setBusy(false);
@@ -307,21 +285,29 @@ export default function SkillsPage() {
           />
         </label>
         )}
-        <label className="mt-3 block text-sm text-slate-700">
-          Документ
+        <div className="mt-3 rounded-2xl border-2 border-violet-300 bg-violet-50/60 p-4 ring-1 ring-violet-200">
+          <p className="text-sm font-medium text-violet-950">Документ навыка</p>
+          <p className="mt-1 text-xs leading-relaxed text-violet-900/70">
+            Можно сразу несколько файлов, до 15 штук по 15 МБ (Word, txt, md). Тот же блок есть в
+            «Изменить» у уже созданного навыка.
+          </p>
           <input
             key={fileInputKey}
             type="file"
+            multiple
             accept=".docx,.txt,.md,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
             className={`${fieldClass} file:mr-3 file:rounded-lg file:border-0 file:bg-violet-100 file:px-3 file:py-1 file:text-sm file:text-violet-800`}
             disabled={busy}
-            onChange={(e) => setCreateFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => setCreateFiles(Array.from(e.target.files ?? []).slice(0, 15))}
           />
-          <span className="mt-1 block text-xs leading-relaxed text-slate-500">
-            Файл можно прикрепить сразу. Подойдут Word (.docx), txt и md. Макс. 15 МБ.
-            {createFile ? ` Выбран: ${createFile.name}` : ""}
-          </span>
-        </label>
+          {createFiles.length ? (
+            <ul className="mt-2 space-y-1 text-xs text-violet-800">
+              {createFiles.map((file) => (
+                <li key={`${file.name}-${file.size}`}>{file.name}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
         <button
           onClick={create}
           disabled={busy}
@@ -417,6 +403,11 @@ export default function SkillsPage() {
             </div>
             {editingId === skill.id && (
               <div className="mt-4 space-y-3">
+                <SkillDocs
+                  skillId={skill.id}
+                  apiBase={apiBase}
+                  onChanged={() => void load(page, query)}
+                />
                 <label className="block text-sm text-slate-700">
                   Название навыка
                   <input
@@ -467,13 +458,6 @@ export default function SkillsPage() {
                   iconUrl={skill.iconUrl}
                   onUpload={(file) => void uploadIcon(skill.id, file)}
                   onRemove={() => void removeIcon(skill.id)}
-                />
-                <DocumentField
-                  busy={busy}
-                  documentName={skill.documentName}
-                  uploadPercent={uploadingSkillId === skill.id ? uploadPercent : null}
-                  onUpload={(file) => void uploadDocument(skill.id, file)}
-                  onRemove={() => void removeDocument(skill.id)}
                 />
                 <button
                   type="button"
@@ -549,76 +533,6 @@ function IconField({
             ) : null}
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function DocumentField({
-  busy,
-  documentName,
-  uploadPercent,
-  onUpload,
-  onRemove,
-}: {
-  busy: boolean;
-  documentName: string;
-  uploadPercent: number | null;
-  onUpload: (file: File) => void;
-  onRemove: () => void;
-}) {
-  const uploading = uploadPercent != null;
-  return (
-    <div className="rounded-xl border border-violet-100 bg-violet-50/30 p-3">
-      <p className="text-sm text-slate-700">Документ навыка</p>
-      <p className="mt-1 text-xs text-slate-500">
-        {documentName?.trim()
-          ? documentName
-          : "Файл не загружен. Подойдут Word (.docx), txt и md. Макс. 15 МБ."}
-      </p>
-      {uploading ? (
-        <div className="mt-2">
-          <div className="flex items-center justify-between text-xs text-violet-700">
-            <span>Загрузка…</span>
-            <span>{uploadPercent}%</span>
-          </div>
-          <div className="mt-1 h-2 overflow-hidden rounded-full bg-violet-100">
-            <div
-              className="h-full rounded-full bg-violet-600 transition-[width] duration-150"
-              style={{ width: `${uploadPercent}%` }}
-            />
-          </div>
-        </div>
-      ) : null}
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <label
-          className={`cursor-pointer rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-sm text-slate-700 ${
-            busy ? "pointer-events-none opacity-60" : ""
-          }`}
-        >
-          {uploading ? `Загрузка ${uploadPercent}%` : "Загрузить"}
-          <input
-            type="file"
-            accept=".docx,.txt,.md,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-            className="hidden"
-            disabled={busy}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) onUpload(file);
-              e.target.value = "";
-            }}
-          />
-        </label>
-        {documentName?.trim() ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onRemove}
-            className="rounded-lg border border-rose-200 px-3 py-1.5 text-sm text-rose-600 disabled:opacity-60"
-          >
-            Убрать
-          </button>
-        ) : null}
       </div>
     </div>
   );

@@ -666,6 +666,7 @@ export default function ClientChatPage() {
               disabled={!agent || busy || limitLocked}
               value={input}
               onChange={setInput}
+              onError={setError}
             />
             <button
               type="submit"
