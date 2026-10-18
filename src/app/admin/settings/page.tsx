@@ -72,9 +72,20 @@ export default function SettingsPage() {
   const [seo, setSeo] = useState<SiteSeo>(emptySeo);
   const [seoNote, setSeoNote] = useState("");
   const [sitemapUrl, setSitemapUrl] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newPassword2, setNewPassword2] = useState("");
+  const [accountNote, setAccountNote] = useState("");
+  const [accountSaving, setAccountSaving] = useState(false);
 
   useEffect(() => {
     if (!orgMode) {
+      void fetch("/api/auth/account")
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.email) setAccountEmail(d.email);
+        });
       void fetch("/api/llm/default-model")
         .then((r) => r.json())
         .then((d) => {
@@ -104,6 +115,42 @@ export default function SettingsPage() {
         if (d.sitemapUrl) setSitemapUrl(d.sitemapUrl);
       });
   }, [orgMode]);
+
+  async function saveAccount() {
+    setAccountNote("");
+    if (newPassword && newPassword !== newPassword2) {
+      setAccountNote("Новые пароли не совпадают");
+      return;
+    }
+    setAccountSaving(true);
+    try {
+      const res = await fetch("/api/auth/account", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: accountEmail,
+          currentPassword,
+          newPassword: newPassword || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAccountNote(data.error ?? "Не удалось сохранить");
+        return;
+      }
+      setAccountEmail(data.email ?? accountEmail);
+      setCurrentPassword("");
+      setNewPassword("");
+      setNewPassword2("");
+      setAccountNote(
+        data.passwordChanged
+          ? "Логин и пароль обновлены"
+          : "Логин обновлён. Пароль не менялся.",
+      );
+    } finally {
+      setAccountSaving(false);
+    }
+  }
 
   async function saveModel() {
     setMessage("");
@@ -184,9 +231,75 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-3xl font-semibold text-slate-900">Настройки</h1>
         <p className="mt-1 text-slate-500">
-          {orgMode ? "Иконка сайта и тексты для поиска" : "Модель, иконка сайта и тексты для поиска"}
+          {orgMode
+            ? "Иконка сайта и тексты для поиска"
+            : "Вход в админку, модель, иконка сайта и тексты для поиска"}
         </p>
       </div>
+
+      {!orgMode && (
+        <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
+          <h2 className="font-medium text-slate-900">Вход в админку</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Email для входа и пароль. Чтобы сменить пароль, заполните новый и подтверждение. Текущий
+            пароль нужен всегда.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <label className="block text-sm text-slate-700 md:col-span-2">
+              Email (логин)
+              <input
+                className={fieldClass}
+                type="email"
+                autoComplete="username"
+                value={accountEmail}
+                onChange={(e) => setAccountEmail(e.target.value)}
+              />
+            </label>
+            <label className="block text-sm text-slate-700">
+              Текущий пароль
+              <input
+                className={fieldClass}
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+              />
+            </label>
+            <div className="hidden md:block" />
+            <label className="block text-sm text-slate-700">
+              Новый пароль
+              <input
+                className={fieldClass}
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Необязательно"
+              />
+            </label>
+            <label className="block text-sm text-slate-700">
+              Повтор нового пароля
+              <input
+                className={fieldClass}
+                type="password"
+                autoComplete="new-password"
+                value={newPassword2}
+                onChange={(e) => setNewPassword2(e.target.value)}
+                placeholder="Необязательно"
+              />
+            </label>
+          </div>
+          <button
+            type="button"
+            disabled={accountSaving || !accountEmail.trim() || !currentPassword}
+            onClick={() => void saveAccount()}
+            className="mt-4 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-violet-500 disabled:bg-slate-200 disabled:text-slate-400"
+          >
+            {accountSaving ? "Сохраняю…" : "Сохранить вход"}
+          </button>
+          {accountNote && <p className="mt-2 text-sm text-slate-600">{accountNote}</p>}
+        </section>
+      )}
 
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="font-medium text-slate-900">Иконка и SEO</h2>

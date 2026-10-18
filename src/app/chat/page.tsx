@@ -8,6 +8,8 @@ import { ArrowUp, FileText, History, Menu, MessageSquarePlus, Sparkles, Trash2, 
 import { InstallAppButton } from "@/components/InstallAppButton";
 import { VoiceInputButton } from "@/components/VoiceInputButton";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { ReplyActions } from "@/components/ReplyActions";
+import { UserMessageMenu } from "@/components/UserMessageMenu";
 import { ThinkingDots } from "@/components/ThinkingDots";
 import { hideOpenButtonToken, splitReplyButtons, type ReplyButton } from "@/lib/replyButtons";
 import { CHAT_UNAVAILABLE, toChatUserMessage } from "@/lib/chatUserError";
@@ -81,6 +83,7 @@ export default function ClientChatPage() {
   const [agent, setAgent] = useState<AgentCard | null>(null);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
+  const [editingFrom, setEditingFrom] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sessionId, setSessionId] = useState(
@@ -217,6 +220,7 @@ export default function ClientChatPage() {
     setMessages([]);
     setActiveSkillId(null);
     setInput("");
+    setEditingFrom(null);
     setError("");
     setHistoryOpen(false);
     setMenuOpen(false);
@@ -226,7 +230,22 @@ export default function ClientChatPage() {
   function openSession(s: ChatSession) {
     setSessionId(s.id);
     setMessages(s.messages);
+    setEditingFrom(null);
+    setInput("");
     setHistoryOpen(false);
+  }
+
+  function beginEdit(index: number) {
+    const msg = messages[index];
+    if (!msg || msg.role !== "user" || busy || limitLocked) return;
+    setEditingFrom(index);
+    setInput(msg.content);
+    inputRef.current?.focus();
+  }
+
+  function cancelEdit() {
+    setEditingFrom(null);
+    setInput("");
   }
 
   async function clearHistory() {
@@ -249,10 +268,12 @@ export default function ClientChatPage() {
     e?.preventDefault();
     if (!agent || !input.trim() || busy) return;
     const text = input.trim();
+    const prior = editingFrom == null ? messages : messages.slice(0, editingFrom);
     setInput("");
+    setEditingFrom(null);
     setBusy(true);
     setError("");
-    const withUser = [...messages, { role: "user" as const, content: text }];
+    const withUser = [...prior, { role: "user" as const, content: text }];
     setMessages([...withUser, { role: "assistant", content: "" }]);
 
     try {
@@ -554,14 +575,12 @@ export default function ClientChatPage() {
                 const raw = m.content || "";
                 const parsed =
                   m.role === "assistant" ? splitReplyButtons(hideOpenButtonToken(raw)) : { text: raw, buttons: [] };
-                return (
+                const bubble = (
                   <div
-                    key={i}
                     className={cn(
-                      "max-w-[92%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed",
-                      m.role === "user"
-                        ? "ml-auto bg-yani-deep text-white"
-                        : "bg-yani-soft/70 text-slate-800",
+                      "rounded-2xl px-4 py-3 text-[15px] leading-relaxed",
+                      m.role === "user" ? "bg-yani-deep text-white" : "bg-yani-soft/70 text-slate-800",
+                      m.role === "user" && editingFrom === i && "ring-2 ring-white/40",
                     )}
                   >
                     {waiting ? (
@@ -578,6 +597,9 @@ export default function ClientChatPage() {
                           <span className="ml-0.5 inline-block animate-pulse text-yani-deep">▍</span>
                         ) : null}
                       </div>
+                    ) : null}
+                    {m.role === "assistant" && !typing && parsed.text ? (
+                      <ReplyActions text={parsed.text} />
                     ) : null}
                     {parsed.buttons.length ? (
                       <div className={cn("flex flex-col gap-2", parsed.text && "mt-3")}>
@@ -607,6 +629,32 @@ export default function ClientChatPage() {
                     ) : null}
                   </div>
                 );
+
+                if (m.role === "user" && parsed.text) {
+                  return (
+                    <UserMessageMenu
+                      key={i}
+                      text={parsed.text}
+                      canEdit={!busy && !limitLocked}
+                      onEdit={() => beginEdit(i)}
+                      className="ml-auto max-w-[92%]"
+                    >
+                      <div className="w-full">{bubble}</div>
+                    </UserMessageMenu>
+                  );
+                }
+
+                return (
+                  <div
+                    key={i}
+                    className={cn(
+                      "max-w-[92%]",
+                      m.role === "user" ? "ml-auto" : undefined,
+                    )}
+                  >
+                    {bubble}
+                  </div>
+                );
               })}
               <div ref={chatEndRef} />
             </div>
@@ -625,6 +673,18 @@ export default function ClientChatPage() {
           onSubmit={send}
           className="mx-auto w-full max-w-3xl rounded-3xl border border-yani-ring/50 bg-white p-3 shadow-[0_8px_30px_rgba(139,111,212,0.12)] focus-within:border-yani-deep"
         >
+          {editingFrom != null && (
+            <div className="mb-2 flex items-center justify-between gap-2 px-1">
+              <span className="text-xs text-yani-ink">Редактирование вопроса</span>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="shrink-0 text-xs text-slate-400 active:text-slate-600"
+              >
+                отмена
+              </button>
+            </div>
+          )}
           {activeSkill && (
             <div className="mb-2 flex items-center gap-2 px-1">
               <span className="max-w-[70%] truncate rounded-full bg-yani-soft px-2.5 py-0.5 text-xs text-yani-ink">

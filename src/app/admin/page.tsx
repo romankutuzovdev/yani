@@ -3,6 +3,19 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+type DayVisit = {
+  day: string;
+  label: string;
+  requests: number;
+  visitors: number;
+};
+
+type RegionVisit = {
+  label: string;
+  requests: number;
+  visitors: number;
+};
+
 type DashboardData = {
   stats: {
     agents: number;
@@ -13,21 +26,8 @@ type DashboardData = {
     todayCost?: string;
     monthCost?: string;
   };
-  recentTasks: Array<{
-    id: string;
-    title: string;
-    status: string;
-    agent: { name: string };
-    createdAt: string;
-  }>;
-};
-
-const STATUS_RU: Record<string, string> = {
-  PENDING: "Ожидает",
-  RUNNING: "Выполняется",
-  COMPLETED: "Готово",
-  FAILED: "Ошибка",
-  CANCELLED: "Отменено",
+  visitsByDay?: DayVisit[];
+  visitsByRegion?: RegionVisit[];
 };
 
 export default function AdminDashboardPage() {
@@ -40,6 +40,9 @@ export default function AdminDashboardPage() {
   }, []);
 
   const stats = data?.stats;
+  const days = data?.visitsByDay ?? [];
+  const regions = data?.visitsByRegion ?? [];
+  const maxRequests = Math.max(1, ...days.map((d) => d.requests));
 
   return (
     <div className="space-y-8">
@@ -74,31 +77,38 @@ export default function AdminDashboardPage() {
       </div>
 
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-medium text-slate-900">Недавние задачи</h2>
-          <Link href="/admin/tasks" className="text-sm text-violet-600 hover:underline">
-            Все
-          </Link>
-        </div>
-        <div className="space-y-3">
-          {(data?.recentTasks ?? []).map((t) => (
-            <Link
-              key={t.id}
-              href={`/admin/tasks/${t.id}`}
-              className="block rounded-xl border border-violet-100 bg-violet-50/40 px-4 py-3 hover:border-violet-200"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-medium text-slate-800">{t.title}</p>
-                  <p className="text-xs text-slate-500">{t.agent.name}</p>
-                </div>
-                <span className="text-xs uppercase text-slate-500">
-                  {STATUS_RU[t.status] ?? t.status}
-                </span>
-              </div>
-            </Link>
+        <h2 className="font-medium text-slate-900">Посещения по дням</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Сообщения в чате за 14 дней. В столбце — число сообщений, уникальные IP считаются отдельно.
+        </p>
+        <div className="mt-5 flex h-44 items-end gap-1.5 sm:gap-2">
+          {days.map((day) => (
+            <div key={day.day} className="flex h-full min-w-0 flex-1 flex-col justify-end" title={`${day.label}: ${day.requests} сообщ., ${day.visitors} IP`}>
+              <span className="mb-1 text-center text-[10px] text-slate-500">{day.requests || ""}</span>
+              <div
+                className="w-full rounded-t-md bg-violet-400"
+                style={{ height: `${Math.max(day.requests ? 8 : 2, (day.requests / maxRequests) * 100)}%` }}
+              />
+              <span className="mt-1 truncate text-center text-[10px] text-slate-400">{day.label}</span>
+            </div>
           ))}
-          {!data?.recentTasks?.length && <p className="text-sm text-slate-500">Задач пока нет</p>}
+          {!days.length && <p className="text-sm text-slate-500">Пока нет данных</p>}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
+        <h2 className="font-medium text-slate-900">Посещения по регионам</h2>
+        <p className="mt-1 text-sm text-slate-500">Страна и регион определяются по IP за те же 14 дней.</p>
+        <div className="mt-4 divide-y divide-violet-50">
+          {regions.map((region) => (
+            <div key={region.label} className="flex items-center justify-between gap-3 py-2.5">
+              <p className="min-w-0 truncate text-sm text-slate-800">{region.label}</p>
+              <p className="shrink-0 text-sm text-slate-500">
+                {region.requests} сообщ. · {region.visitors} IP
+              </p>
+            </div>
+          ))}
+          {!regions.length && <p className="text-sm text-slate-500">Пока нет данных</p>}
         </div>
       </section>
     </div>
