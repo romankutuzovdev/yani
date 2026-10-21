@@ -145,6 +145,7 @@ model Agent {
   usage      UsageRecord[]
   logs       SystemLog[]
   chats      ChatMessage[]
+  salesPlaybooks SalesPlaybook[]
   orgUsers   User[]        @relation("OrgCabinet")
   ipBlocks   AgentIpBlock[]
   docs       AgentDoc[]
@@ -408,6 +409,330 @@ model ChatMessage {
   agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
   @@index([agentId, sessionId, createdAt])
+}
+
+/** One isolated sales workspace: product, prompt, pipeline and its client base. */
+model SalesPlaybook {
+  id                 String   @id @default(cuid())
+  agentId            String
+  name               String
+  product            String   @default("")
+  systemPrompt       String   @default("")
+  goals              String   @default("")
+  communicationStyle String   @default("")
+  restrictions       String   @default("")
+  qualificationQuestions String @default("")
+  status             String   @default("STOPPED")
+  sendMode           String   @default("APPROVAL_REQUIRED")
+  replyCount         Int      @default(0)
+  replySpendUsd      Float    @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  agent     Agent          @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  documents SalesDocument[]
+  channelConnections CrmChannelConnection[]
+  leads     SalesLead[]
+  identities LeadIdentity[]
+  importJobs CrmImportJob[]
+  campaigns  CrmCampaign[]
+  auditEvents CrmAuditEvent[]
+  deadLetters CrmDeadLetter[]
+
+  @@unique([agentId, name])
+  @@index([agentId, status])
+}
+
+/** Source material used to ground CRM replies and proposals. */
+model SalesDocument {
+  id          String   @id @default(cuid())
+  playbookId  String
+  fileName    String
+  url         String
+  mimeType    String
+  text        String   @default("")
+  sizeBytes   Int      @default(0)
+  status      String   @default("READY")
+  error       String   @default("")
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  playbook SalesPlaybook @relation(fields: [playbookId], references: [id], onDelete: Cascade)
+
+  @@index([playbookId, sortOrder])
+}
+
+/** Potential client inside exactly one sales playbook. */
+model SalesLead {
+  id               String   @id @default(cuid())
+  playbookId       String
+  displayName      String   @default("")
+  company          String   @default("")
+  email            String   @default("")
+  phone            String   @default("")
+  telegram         String   @default("")
+  stage            String   @default("NEW")
+  notes            String   @default("")
+  agentInstruction String   @default("")
+  agentPaused      Boolean  @default(false)
+  replyCount       Int      @default(0)
+  replySpendUsd    Float    @default(0)
+  lastContactAt    DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  playbook     SalesPlaybook   @relation(fields: [playbookId], references: [id], onDelete: Cascade)
+  identities   LeadIdentity[]
+  conversations CrmConversation[]
+  fieldChanges LeadFieldChange[]
+  campaignItems CrmCampaignItem[]
+
+  @@index([playbookId, stage, updatedAt])
+  @@index([playbookId, lastContactAt])
+}
+
+/** Normalized contact key used to prevent duplicates inside one playbook. */
+model LeadIdentity {
+  id           String   @id @default(cuid())
+  playbookId   String
+  leadId       String
+  type         String
+  value        String
+  originalValue String  @default("")
+  createdAt    DateTime @default(now())
+
+  playbook SalesPlaybook @relation(fields: [playbookId], references: [id], onDelete: Cascade)
+  lead     SalesLead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([playbookId, type, value])
+  @@index([leadId])
+}
+
+/** Audit log for automatic or manual CRM field updates. */
+model LeadFieldChange {
+  id         String   @id @default(cuid())
+  leadId     String
+  field      String
+  oldValue   String   @default("")
+  newValue   String
+  source     String   @default("AUTO")
+  confidence Float    @default(1)
+  evidence   String   @default("")
+  createdAt  DateTime @default(now())
+
+  lead SalesLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+}
+
+/** Persistent CRM thread. External channels will attach to it in later phases. */
+model CrmConversation {
+  id               String   @id @default(cuid())
+  leadId           String
+  channel          String   @default("MANUAL")
+  externalThreadId String   @default("")
+  externalContext  String   @default("{}")
+  lastMessageAt    DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  lead     SalesLead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  messages CrmMessage[]
+  outbox   CrmOutboxMessage[]
+
+  @@unique([leadId, channel])
+  @@index([leadId, lastMessageAt])
+}
+
+/** A single inbound, outbound or draft item in a CRM conversation. */
+model CrmMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  direction      String
+  status         String   @default("RECORDED")
+  body           String
+  attachments    String   @default("[]")
+  externalId     String   @default("")
+  createdAt      DateTime @default(now())
+
+  conversation CrmConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  outbox       CrmOutboxMessage?
+
+  @@index([conversationId, createdAt])
+}
+
+/** Encrypted external channel credentials and polling state for one playbook. */
+model CrmChannelConnection {
+  id              String   @id @default(cuid())
+  playbookId      String
+  type            String
+  status          String   @default("CONNECTED")
+  config          String   @default("{}")
+  encryptedSecret String
+  lastError       String   @default("")
+  lastPolledAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  playbook     SalesPlaybook   @relation(fields: [playbookId], references: [id], onDelete: Cascade)
+  inboundEvents CrmInboundEvent[]
+  outboxMessages CrmOutboxMessage[]
+
+  @@unique([playbookId, type])
+  @@index([type, status])
+}
+
+/** Idempotent copy of an update received from an external channel. */
+model CrmInboundEvent {
+  id           String   @id @default(cuid())
+  connectionId String
+  externalId   String
+  payload      String
+  status       String   @default("RECEIVED")
+  error        String   @default("")
+  createdAt    DateTime @default(now())
+  processedAt  DateTime?
+
+  connection CrmChannelConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, externalId])
+  @@index([connectionId, status, createdAt])
+}
+
+/** Persistent delivery queue. Only APPROVED rows may be sent by a worker. */
+model CrmOutboxMessage {
+  id             String   @id @default(cuid())
+  connectionId   String
+  conversationId String
+  messageId      String   @unique
+  status         String   @default("DRAFT")
+  body           String
+  attempts       Int      @default(0)
+  maxAttempts    Int      @default(5)
+  nextAttemptAt  DateTime @default(now())
+  externalId     String   @default("")
+  error          String   @default("")
+  approvedAt     DateTime?
+  sentAt         DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  connection   CrmChannelConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  conversation CrmConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message      CrmMessage           @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, status, nextAttemptAt])
+  @@index([conversationId, createdAt])
+}
+
+/** Batch import of contacts into a sales playbook. */
+model CrmImportJob {
+  id              String   @id @default(cuid())
+  playbookId      String
+  fileName        String
+  status          String   @default("PREVIEW")
+  totalRows       Int      @default(0)
+  validRows       Int      @default(0)
+  createdCount    Int      @default(0)
+  duplicateCount  Int      @default(0)
+  skippedCount    Int      @default(0)
+  reportJson      String   @default("{}")
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  playbook SalesPlaybook @relation(fields: [playbookId], references: [id], onDelete: Cascade)
+
+  @@index([playbookId, createdAt])
+}
+
+/** Mass first-touch campaign (email MVP). */
+model CrmCampaign {
+  id               String   @id @default(cuid())
+  playbookId       String
+  name             String
+  channel          String   @default("EMAIL")
+  status           String   @default("DRAFT")
+  subject          String   @default("")
+  bodyTemplate     String   @default("")
+  dailyLimit       Int      @default(40)
+  intervalSeconds  Int      @default(90)
+  quietHoursStart  Int?
+  quietHoursEnd    Int?
+  timezone         String   @default("Europe/Minsk")
+  sentToday        Int      @default(0)
+  sentTodayDate    String   @default("")
+  importJobId      String   @default("")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  startedAt        DateTime?
+  stoppedAt        DateTime?
+
+  playbook SalesPlaybook   @relation(fields: [playbookId], references: [id], onDelete: Cascade)
+  items    CrmCampaignItem[]
+
+  @@index([playbookId, status, updatedAt])
+  @@index([status, updatedAt])
+}
+
+model CrmCampaignItem {
+  id             String   @id @default(cuid())
+  campaignId     String
+  leadId         String
+  status         String   @default("PENDING")
+  scheduledAt    DateTime @default(now())
+  outboxId       String   @default("")
+  error          String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  processedAt    DateTime?
+
+  campaign CrmCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead     SalesLead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, leadId])
+  @@index([campaignId, status, scheduledAt])
+  @@index([status, scheduledAt])
+}
+
+/** Immutable CRM audit trail for managers and operators. */
+model CrmAuditEvent {
+  id         String   @id @default(cuid())
+  playbookId String?
+  agentId    String?
+  userId     String?
+  action     String
+  entityType String   @default("")
+  entityId   String   @default("")
+  summary    String
+  meta       String   @default("{}")
+  createdAt  DateTime @default(now())
+
+  playbook SalesPlaybook? @relation(fields: [playbookId], references: [id], onDelete: SetNull)
+
+  @@index([playbookId, createdAt])
+  @@index([action, createdAt])
+  @@index([entityType, entityId])
+}
+
+/** Permanently failed deliveries moved out of the hot outbox. */
+model CrmDeadLetter {
+  id           String   @id @default(cuid())
+  playbookId   String
+  connectionId String   @default("")
+  outboxId     String   @default("")
+  messageId    String   @default("")
+  channel      String   @default("")
+  body         String   @default("")
+  error        String   @default("")
+  attempts     Int      @default(0)
+  payload      String   @default("{}")
+  createdAt    DateTime @default(now())
+  resolvedAt   DateTime?
+
+  playbook SalesPlaybook @relation(fields: [playbookId], references: [id], onDelete: Cascade)
+
+  @@index([playbookId, createdAt])
+  @@index([resolvedAt, createdAt])
 }
 
 model ApiKey {

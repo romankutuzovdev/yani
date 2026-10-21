@@ -36,6 +36,18 @@ jobs:
           JWT_SECRET: ci-build-only
         run: npm run build
 
+      - name: Bundle CRM workers
+        run: |
+          set -eu
+          npx --yes esbuild \
+            scripts/crm-telegram-worker.ts \
+            scripts/crm-email-worker.ts \
+            scripts/crm-worker.ts \
+            --bundle --platform=node --format=cjs \
+            --packages=external \
+            --alias:@=./src \
+            --outdir=.next/standalone/crm-workers
+
       - name: Pack standalone
         run: |
           set -eu
@@ -43,6 +55,9 @@ jobs:
           mkdir -p .next/standalone/.next
           rm -rf .next/standalone/.next/static
           cp -a .next/static .next/standalone/.next/static
+          mkdir -p .next/standalone/prisma
+          cp -a prisma/schema.prisma .next/standalone/prisma/schema.prisma
+          cp -a prisma/migrations .next/standalone/prisma/migrations
           rm -f .next/standalone/.env
           tar -czf yani-release.tgz -C .next/standalone .
 

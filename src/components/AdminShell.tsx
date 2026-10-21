@@ -3,11 +3,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, Bot, KeyRound, LayoutDashboard, ScrollText, Settings, Shield, Sparkles } from "lucide-react";
+import { BarChart3, Bot, BriefcaseBusiness, KeyRound, LayoutDashboard, ScrollText, Settings, Shield, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const ADMIN_NAV = [
   { href: "/admin", label: "Обзор", icon: LayoutDashboard },
+  { href: "/admin/crm", label: "CRM продаж", icon: BriefcaseBusiness },
   { href: "/admin/agents", label: "Агенты", icon: Bot },
   { href: "/admin/skills", label: "Навыки", icon: Sparkles },
   { href: "/admin/analytics", label: "Аналитика", icon: BarChart3 },
@@ -19,6 +20,7 @@ const ADMIN_NAV = [
 
 const ORG_NAV = [
   { href: "/org", label: "Обзор", icon: LayoutDashboard },
+  { href: "/org/crm", label: "CRM продаж", icon: BriefcaseBusiness },
   { href: "/org/agents", label: "Агенты", icon: Bot },
   { href: "/org/skills", label: "Навыки", icon: Sparkles },
   { href: "/org/requests", label: "Запросы", icon: Shield },

@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   devIndicators: false,
+  serverExternalPackages: ["ioredis", "bullmq", "telegram", "imapflow", "nodemailer", "mailparser"],
   async headers() {
     return [
       {
