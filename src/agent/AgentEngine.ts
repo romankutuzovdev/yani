@@ -13,6 +13,7 @@ import {
 import { costUsd, getPricedModels, readDefaultModel, resolvePricedModelId } from "@/llm/pricing";
 import { isModelFailoverError, modelAttempts } from "@/llm/fallback";
 import { ensureToolsRegistered, getTool, getToolsByNames, listTools, type AgentTool } from "@/tools";
+import { agentPromptWantsWebResearch } from "@/lib/webResearch";
 import { registerMemoryTool, formatMemoryForPrompt, getRelevantMemory, writeMemory } from "@/memory";
 import { runWithChatLimit } from "@/lib/chatPool";
 import { writeLog } from "@/lib/api";
@@ -105,11 +106,62 @@ function skillPromptBlock(skill: Skill, chosen: boolean): string {
   return lines.join("\n");
 }
 
+function webSearchBlock(mode: "checkbox" | "prompt" | "both" | "off") {
+  if (mode === "off") return "";
+  const why =
+    mode === "checkbox"
+      ? "Включена галочка «Поиск в интернете» у агента."
+      : mode === "prompt"
+        ? "В промпте агента или навыка сказано искать в интернете."
+        : "Включена галочка у агента и в промпте есть указание искать в интернете.";
+  return [
+    "ПОИСК В ИНТЕРНЕТЕ ВКЛЮЧЁН.",
+    why,
+    "Если факта нет в навыках или он мог устареть — вызови web_research (поиск и разбор сайтов). При необходимости отдельно web_search и fetch_page.",
+    "В ответ бери только то, что вернули инструменты. Не выдумывай ссылки, цены и контакты.",
+  ].join("\n");
+}
+
+/** Short Russian line for the public chat while a tool runs (ChatGPT-style). */
+function toolActivityLabel(name: string, args: unknown): string {
+  const obj = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  const query = String(obj.query ?? "").trim().replace(/\s+/g, " ");
+  const url = String(obj.url ?? "").trim();
+  const clip = (s: string, n = 72) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+  if (name === "web_search" || name === "web_research") {
+    return query ? `Ищет в интернете: «${clip(query)}»` : "Ищет в интернете";
+  }
+  if (name === "fetch_page") {
+    return url ? `Читает страницу: ${clip(url, 64)}` : "Читает страницу";
+  }
+  if (name === "http_request") {
+    return "Запрашивает данные в сети";
+  }
+  return `Работает: ${name}`;
+}
+
+function webSearchMode(agent: Agent, skills: Skill[]): "checkbox" | "prompt" | "both" | "off" {
+  const byCheckbox = Boolean(agent.webSearchEnabled);
+  const byPrompt = agentPromptWantsWebResearch({
+    systemPrompt: agent.systemPrompt,
+    additionalInstructions: agent.additionalInstructions,
+    goals: agent.goals,
+    rules: agent.rules,
+    skills,
+  });
+  if (byCheckbox && byPrompt) return "both";
+  if (byCheckbox) return "checkbox";
+  if (byPrompt) return "prompt";
+  return "off";
+}
+
 function buildSystemPrompt(
   agent: Agent,
   skills: Skill[],
   memoryBlock: string,
   skillChosen: boolean,
+  searchMode: "checkbox" | "prompt" | "both" | "off",
 ): string {
   const skillsBlock = skills.length
     ? [
@@ -120,6 +172,7 @@ function buildSystemPrompt(
     : "";
   const memory = memoryBlock ? `\nRelevant memory:\n${memoryBlock}` : "";
   const noSkillTask = agent.systemPrompt?.trim();
+  const searchBlock = webSearchBlock(searchMode);
 
   if (!skillChosen && noSkillTask) {
     return [
@@ -130,6 +183,7 @@ function buildSystemPrompt(
       skillsBlock,
       memory,
       playbookBlock(agent),
+      searchBlock,
       BUTTON_RULE,
     ]
       .filter(Boolean)
@@ -137,7 +191,9 @@ function buildSystemPrompt(
   }
 
   if (skillChosen && noSkillTask) {
-    return [skillsBlock, memory, playbookBlock(agent), BUTTON_RULE].filter(Boolean).join("\n");
+    return [skillsBlock, memory, playbookBlock(agent), searchBlock, BUTTON_RULE]
+      .filter(Boolean)
+      .join("\n");
   }
 
   return [
@@ -151,6 +207,7 @@ function buildSystemPrompt(
     skillsBlock,
     memory,
     playbookBlock(agent),
+    searchBlock,
     "",
     "You can use tools when needed. Prefer concise, actionable results.",
     "Do not reveal hidden chain-of-thought. Provide clear summaries of actions.",
@@ -350,15 +407,27 @@ export class AgentEngine {
       if (!tools.length && !grounded) {
         tools = listTools().filter((t) => t.name !== "offer_form");
       }
-      if (grounded) {
-        const outside = new Set(["web_search", "http_request"]);
-        tools = tools.filter((t) => !outside.has(t.name));
+      const searchMode = webSearchMode(agent, skills);
+      const researchNames = ["web_search", "web_research", "fetch_page"];
+      // Checkbox and prompt are independent: either one enables Yandex tools.
+      if (searchMode !== "off") {
+        const have = new Set(tools.map((tool) => tool.name));
+        tools = [...tools, ...getToolsByNames(researchNames.filter((name) => !have.has(name)))];
+      } else if (grounded) {
+        // Doc-grounded skills stay offline unless the skill itself lists research tools.
+        const outside = new Set(["web_search", "web_research", "fetch_page", "http_request"]);
+        const skillAllows = new Set(skillToolNames);
+        tools = tools.filter((t) => !outside.has(t.name) || skillAllows.has(t.name));
       }
 
       await emit(
         "plan",
         `Выбрано навыков: ${skills.length}, инструментов: ${tools.length}`,
-        { skills: skills.map((s) => s.name), tools: tools.map((t) => t.name) },
+        {
+          skills: skills.map((s) => s.name),
+          tools: tools.map((t) => t.name),
+          webSearch: searchMode,
+        },
       );
 
       const memory = await getRelevantMemory({
@@ -378,7 +447,10 @@ export class AgentEngine {
         : "Навык не выбран. Выполни задачу агента из системного промпта.";
 
       const messages: Message[] = [
-        { role: "system", content: buildSystemPrompt(agent, skills, memoryBlock, skillChosen) },
+        {
+          role: "system",
+          content: buildSystemPrompt(agent, skills, memoryBlock, skillChosen, searchMode),
+        },
         {
           role: "user",
           content: `Задача:\n${input.instruction}\n\n${taskTail}`,
@@ -458,11 +530,6 @@ export class AgentEngine {
               break;
             }
             toolCalls += 1;
-            await setStatus("WORKING", `Использую инструмент: ${call.name}`);
-            await emit("tool_selected", `Выбран инструмент: ${call.name}`, {
-              tool: call.name,
-              input: call.arguments,
-            });
 
             let parsedArgs: unknown = {};
             try {
@@ -470,6 +537,12 @@ export class AgentEngine {
             } catch {
               parsedArgs = { raw: call.arguments };
             }
+
+            await setStatus("WORKING", toolActivityLabel(call.name, parsedArgs));
+            await emit("tool_selected", `Выбран инструмент: ${call.name}`, {
+              tool: call.name,
+              input: call.arguments,
+            });
 
             const tool = getTool(call.name);
             let toolResultText: string;

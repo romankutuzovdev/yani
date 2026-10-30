@@ -131,7 +131,13 @@ function addColumn(sql) {
 }
 addColumn('ALTER TABLE "User" ADD COLUMN "planName" TEXT NOT NULL DEFAULT \'\'');
 addColumn('ALTER TABLE "User" ADD COLUMN "planMonthlyPrice" REAL NOT NULL DEFAULT 0');
+addColumn('ALTER TABLE "User" ADD COLUMN "salesEnabled" INTEGER NOT NULL DEFAULT 0');
+addColumn('ALTER TABLE "User" ADD COLUMN "salesPlanName" TEXT NOT NULL DEFAULT \'\'');
+addColumn('ALTER TABLE "User" ADD COLUMN "salesPlanMonthlyPrice" REAL NOT NULL DEFAULT 0');
+addColumn('ALTER TABLE "User" ADD COLUMN "salesPlaybookLimit" INTEGER NOT NULL DEFAULT 0');
+addColumn('ALTER TABLE "User" ADD COLUMN "salesAgentLimit" INTEGER NOT NULL DEFAULT 1');
 addColumn('ALTER TABLE "Agent" ADD COLUMN "isPrimary" INTEGER NOT NULL DEFAULT 0');
+addColumn('ALTER TABLE "Agent" ADD COLUMN "webSearchEnabled" INTEGER NOT NULL DEFAULT 0');
 const marked = db.prepare('SELECT COUNT(*) AS n FROM "Agent" WHERE "isPrimary" = 1').get();
 if (!marked || Number(marked.n) === 0) {
   const pick = db.prepare(
@@ -157,7 +163,7 @@ if (migrationsDir && fs.existsSync(migrationsDir)) {
       db.exec("BEGIN");
       db.exec(sql);
       db.prepare(
-        'INSERT INTO "_prisma_migrations" (id, checksum, finished_at, migration_name, applied_steps_count) VALUES (?, ?, datetime("now"), ?, 1)',
+        "INSERT INTO \"_prisma_migrations\" (id, checksum, finished_at, migration_name, applied_steps_count) VALUES (?, ?, datetime('now'), ?, 1)",
       ).run(name, "hoster-apply", name);
       db.exec("COMMIT");
       console.log("applied migration", name);
@@ -166,7 +172,7 @@ if (migrationsDir && fs.existsSync(migrationsDir)) {
       // Partial CRM DBs may already have objects from a previous manual patch.
       if (/already exists|duplicate column/i.test(String(err && err.message || err))) {
         db.prepare(
-          'INSERT OR IGNORE INTO "_prisma_migrations" (id, checksum, finished_at, migration_name, applied_steps_count) VALUES (?, ?, datetime("now"), ?, 1)',
+          "INSERT OR IGNORE INTO \"_prisma_migrations\" (id, checksum, finished_at, migration_name, applied_steps_count) VALUES (?, ?, datetime('now'), ?, 1)",
         ).run(name, "hoster-apply-exists", name);
         console.log("migration already present", name);
         continue;

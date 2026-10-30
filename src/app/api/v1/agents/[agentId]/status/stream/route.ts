@@ -49,9 +49,10 @@ export async function GET(req: NextRequest, { params }: Params) {
       };
 
       await tick();
+      // Faster ticks so «Ищет в интернете» appears promptly in the chat bubble.
       const interval = setInterval(() => {
         void tick();
-      }, 1000);
+      }, 400);
 
       const abort = () => {
         closed = true;

@@ -1,35 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, Play, Square, Upload } from "lucide-react";
+import { Play, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type PreviewRow = {
-  rowNumber: number;
-  displayName: string;
-  company: string;
-  email: string;
-  phone: string;
-  telegram: string;
-  status: "OK" | "DUPLICATE" | "SKIPPED";
-  reason: string;
-};
-
-type ImportJob = {
+type ContactList = {
   id: string;
-  fileName: string;
-  status: string;
-  totalRows: number;
-  validRows: number;
-  createdCount: number;
-  duplicateCount: number;
-  skippedCount: number;
+  name: string;
+  channel: "EMAIL" | "TELEGRAM";
+  _count?: { contacts: number };
 };
 
 type Campaign = {
   id: string;
   name: string;
   status: string;
+  channel?: string;
+  bodyMode?: string;
   dailyLimit: number;
   intervalSeconds: number;
   sentToday: number;
@@ -57,18 +44,33 @@ export function SalesCrmImport({
   onImported,
   onNotice,
 }: Props) {
-  const [job, setJob] = useState<ImportJob | null>(null);
-  const [rows, setRows] = useState<PreviewRow[]>([]);
+  const [lists, setLists] = useState<ContactList[]>([]);
+  const [selectedListIds, setSelectedListIds] = useState<Set<string>>(new Set());
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campaignName, setCampaignName] = useState("Первые письма");
   const [subject, setSubject] = useState("Коротко про {{company}}");
   const [bodyTemplate, setBodyTemplate] = useState(
-    "Здравствуйте, {{name}}!\n\nПишу по поводу решения для {{company}}. Могу коротко рассказать, как Yani помогает продажам.\n\nГотовы к короткому созвону?",
+    "Напиши короткое первое сообщение: познакомься, коротко объясни ценность Yani для продаж в компании получателя, предложи 15-минутный созвон. Тон дружелюбный, без воды.",
   );
-  const [dailyLimit, setDailyLimit] = useState(20);
+  const [emailDailyLimit, setEmailDailyLimit] = useState(20);
+  const [telegramDailyLimit, setTelegramDailyLimit] = useState(20);
   const [intervalSeconds, setIntervalSeconds] = useState(90);
   const [quietStart, setQuietStart] = useState("22");
   const [quietEnd, setQuietEnd] = useState("8");
+
+  const selectedLists = lists.filter((list) => selectedListIds.has(list.id));
+  const hasEmailLists = selectedLists.some((list) => list.channel === "EMAIL");
+  const hasTelegramLists = selectedLists.some((list) => list.channel === "TELEGRAM");
+
+  async function loadLists() {
+    try {
+      const res = await fetch(`/api/crm/playbooks/${playbookId}/contact-lists?agentId=${agentId}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setLists(data.lists ?? []);
+    } catch {
+      /* offline */
+    }
+  }
 
   async function loadCampaigns() {
     try {
@@ -81,62 +83,24 @@ export function SalesCrmImport({
   }
 
   useEffect(() => {
+    void loadLists();
     void loadCampaigns();
   }, [agentId, playbookId]);
 
-  async function onFile(file: File | null) {
-    if (!file) return;
-    setBusy(true);
-    try {
-      const form = new FormData();
-      form.set("agentId", agentId);
-      form.set("file", file);
-      const res = await fetch(`/api/crm/playbooks/${playbookId}/import`, {
-        method: "POST",
-        body: form,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        onNotice(data.error ?? "Не удалось разобрать файл");
-        return;
-      }
-      setJob(data.job);
-      setRows(data.rows ?? []);
-      onNotice(
-        `Превью: ${data.job.validRows} новых, ${data.job.duplicateCount} дублей, ${data.job.skippedCount} пропусков`,
-      );
-    } catch {
-      onNotice("Сервер CRM недоступен. Обновите страницу.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function confirmImport() {
-    if (!job) return;
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/crm/playbooks/${playbookId}/import`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentId, jobId: job.id }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        onNotice(data.error ?? "Импорт не применён");
-        return;
-      }
-      setJob(data.job);
-      onNotice(`Импортировано карточек: ${data.createdCount}`);
-      onImported();
-    } catch {
-      onNotice("Сервер CRM недоступен. Обновите страницу.");
-    } finally {
-      setBusy(false);
-    }
+  function toggleList(id: string) {
+    setSelectedListIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   async function createCampaign() {
+    if (!selectedListIds.size) {
+      onNotice("Выберите один или несколько списков контактов");
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch(`/api/crm/playbooks/${playbookId}/campaigns`, {
@@ -145,14 +109,15 @@ export function SalesCrmImport({
         body: JSON.stringify({
           agentId,
           name: campaignName,
-          subject,
+          subject: hasEmailLists ? subject : "",
+          bodyMode: "PROMPT",
           bodyTemplate,
-          dailyLimit,
+          emailDailyLimit,
+          telegramDailyLimit,
           intervalSeconds,
           quietHoursStart: quietStart === "" ? null : Number(quietStart),
           quietHoursEnd: quietEnd === "" ? null : Number(quietEnd),
-          importJobId: job?.status === "IMPORTED" ? job.id : undefined,
-          onlyNewWithEmail: job?.status !== "IMPORTED",
+          contactListIds: [...selectedListIds],
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -160,7 +125,10 @@ export function SalesCrmImport({
         onNotice(data.error ?? "Кампания не создана");
         return;
       }
-      onNotice(`Кампания создана: ${data.campaign._count?.items ?? 0} писем в очереди`);
+      const created = (data.campaigns as Campaign[] | undefined) ?? (data.campaign ? [data.campaign] : []);
+      const totalItems = created.reduce((sum, item) => sum + (item._count?.items ?? 0), 0);
+      onNotice(`Очередь создана: ${created.length} камп., ${totalItems} контактов`);
+      onImported();
       await loadCampaigns();
     } catch {
       onNotice("Сервер CRM недоступен. Обновите страницу.");
@@ -192,103 +160,91 @@ export function SalesCrmImport({
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-2">
-        <a
-          href="/api/crm/import-template"
-          className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-violet-700"
-        >
-          <Download size={16} aria-hidden />
-          Шаблон CSV
-        </a>
-        <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl bg-violet-600 px-3 py-2 text-sm font-medium text-white">
-          <Upload size={16} aria-hidden />
-          Загрузить CSV/XLSX
-          <input
-            type="file"
-            accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            className="hidden"
-            disabled={busy}
-            onChange={(event) => void onFile(event.target.files?.[0] ?? null)}
-          />
-        </label>
-        {job?.status === "PREVIEW" && (
-          <button
-            type="button"
-            disabled={busy || !job.validRows}
-            onClick={() => void confirmImport()}
-            className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 disabled:opacity-40"
-          >
-            Импортировать {job.validRows}
-          </button>
-        )}
-      </div>
-
-      {!!rows.length && (
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
-          <table className="min-w-full text-left text-xs text-slate-600">
-            <thead className="bg-slate-50 text-slate-500">
-              <tr>
-                <th className="px-3 py-2">#</th>
-                <th className="px-3 py-2">Имя</th>
-                <th className="px-3 py-2">Email</th>
-                <th className="px-3 py-2">Статус</th>
-                <th className="px-3 py-2">Комментарий</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.rowNumber} className="border-t border-slate-100">
-                  <td className="px-3 py-2">{row.rowNumber}</td>
-                  <td className="px-3 py-2">{row.displayName || row.company || "—"}</td>
-                  <td className="px-3 py-2">{row.email || "—"}</td>
-                  <td className="px-3 py-2">
-                    <span
-                      className={cn(
-                        row.status === "OK" && "text-emerald-700",
-                        row.status === "DUPLICATE" && "text-amber-700",
-                        row.status === "SKIPPED" && "text-slate-400",
-                      )}
-                    >
-                      {row.status}
+      <div>
+        <p className="text-sm font-medium text-slate-700">Списки контактов</p>
+        <p className="mt-1 text-xs text-slate-500">
+          Выберите один или несколько списков из раздела «Контакты». Новые контакты в списке
+          попадут в очередь, даже если кампания уже запущена.
+        </p>
+        <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-200 p-2">
+          {!lists.length && (
+            <li className="px-2 py-6 text-center text-sm text-slate-400">
+              Списков нет — сначала создайте их в «Контакты»
+            </li>
+          )}
+          {lists.map((list) => {
+            const checked = selectedListIds.has(list.id);
+            return (
+              <li key={list.id}>
+                <label
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm",
+                    checked ? "bg-violet-50" : "hover:bg-slate-50",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleList(list.id)}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="font-medium text-slate-800">{list.name}</span>
+                    <span className="ml-2 text-xs text-slate-500">
+                      {list.channel === "EMAIL" ? "Email" : "Telegram"} ·{" "}
+                      {list._count?.contacts ?? 0}
                     </span>
-                  </td>
-                  <td className="px-3 py-2">{row.reason || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
 
       <div className="grid gap-3 md:grid-cols-2">
         <label className="text-sm text-slate-600">
           Название кампании
           <input className={fieldClass} value={campaignName} onChange={(e) => setCampaignName(e.target.value)} />
         </label>
-        <label className="text-sm text-slate-600">
-          Тема письма
-          <input className={fieldClass} value={subject} onChange={(e) => setSubject(e.target.value)} />
-        </label>
+        {hasEmailLists && (
+          <label className="text-sm text-slate-600">
+            Тема письма
+            <input className={fieldClass} value={subject} onChange={(e) => setSubject(e.target.value)} />
+          </label>
+        )}
         <label className="md:col-span-2 text-sm text-slate-600">
-          Текст первого письма
+          Промпт агенту для первого сообщения
           <textarea
             className={cn(fieldClass, "min-h-28")}
             value={bodyTemplate}
             onChange={(e) => setBodyTemplate(e.target.value)}
           />
           <span className="mt-1 block text-xs text-slate-400">
-            Плейсхолдеры: {"{{name}}"}, {"{{company}}"}, {"{{email}}"}, {"{{phone}}"}, {"{{telegram}}"}
+            Агент сам напишет текст по этой инструкции для каждого контакта.
           </span>
         </label>
         <label className="text-sm text-slate-600">
-          Лимит в день
+          Лимит email в день
           <input
             type="number"
             min={1}
             max={500}
             className={fieldClass}
-            value={dailyLimit}
-            onChange={(e) => setDailyLimit(Number(e.target.value) || 1)}
+            value={emailDailyLimit}
+            disabled={!hasEmailLists && selectedListIds.size > 0}
+            onChange={(e) => setEmailDailyLimit(Number(e.target.value) || 1)}
+          />
+        </label>
+        <label className="text-sm text-slate-600">
+          Лимит Telegram в день
+          <input
+            type="number"
+            min={1}
+            max={500}
+            className={fieldClass}
+            value={telegramDailyLimit}
+            disabled={!hasTelegramLists && selectedListIds.size > 0}
+            onChange={(e) => setTelegramDailyLimit(Number(e.target.value) || 1)}
           />
         </label>
         <label className="text-sm text-slate-600">
@@ -302,23 +258,25 @@ export function SalesCrmImport({
             onChange={(e) => setIntervalSeconds(Number(e.target.value) || 10)}
           />
         </label>
-        <label className="text-sm text-slate-600">
-          Quiet hours с
-          <input className={fieldClass} value={quietStart} onChange={(e) => setQuietStart(e.target.value)} placeholder="22" />
-        </label>
-        <label className="text-sm text-slate-600">
-          Quiet hours до
-          <input className={fieldClass} value={quietEnd} onChange={(e) => setQuietEnd(e.target.value)} placeholder="8" />
-        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="text-sm text-slate-600">
+            Quiet hours с
+            <input className={fieldClass} value={quietStart} onChange={(e) => setQuietStart(e.target.value)} placeholder="22" />
+          </label>
+          <label className="text-sm text-slate-600">
+            Quiet hours до
+            <input className={fieldClass} value={quietEnd} onChange={(e) => setQuietEnd(e.target.value)} placeholder="8" />
+          </label>
+        </div>
       </div>
 
       <button
         type="button"
-        disabled={busy}
+        disabled={busy || !selectedListIds.size}
         onClick={() => void createCampaign()}
         className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white disabled:bg-slate-200"
       >
-        Создать очередь первых писем
+        Создать очередь по спискам
       </button>
 
       {!!campaigns.length && (
@@ -331,8 +289,11 @@ export function SalesCrmImport({
               <div>
                 <p className="font-medium text-slate-800">{campaign.name}</p>
                 <p className="text-xs text-slate-500">
-                  {campaign.status} · сегодня {campaign.sentToday}/{campaign.dailyLimit} · очередь{" "}
-                  {campaign.counts?.PENDING ?? 0} · интервал {campaign.intervalSeconds}с
+                  {campaign.status} ·{" "}
+                  {campaign.channel === "TELEGRAM" ? "Telegram" : "Email"} ·{" "}
+                  промпт · сегодня{" "}
+                  {campaign.sentToday}/{campaign.dailyLimit} · очередь {campaign.counts?.PENDING ?? 0} ·
+                  интервал {campaign.intervalSeconds}с
                 </p>
               </div>
               <div className="flex gap-2">

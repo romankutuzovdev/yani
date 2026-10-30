@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Download } from "lucide-react";
+import { fileDownloadUrl } from "@/lib/downloadUrl";
 
 type DocRow = {
   id: string;
@@ -146,6 +148,14 @@ export function AgentDocs({ agentId }: { agentId: string; slug?: string }) {
               <option value="preview">Предпросмотр</option>
               <option value="direct">Сразу</option>
             </select>
+            <a
+              href={fileDownloadUrl(doc.url, doc.fileName || doc.title)}
+              download={doc.fileName || doc.title}
+              className="inline-flex items-center gap-1 rounded-lg border border-violet-200 px-3 py-1.5 text-sm text-violet-700 hover:bg-violet-50"
+            >
+              <Download size={14} />
+              Скачать
+            </a>
             <button
               type="button"
               disabled={busy}

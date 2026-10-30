@@ -27,7 +27,18 @@ export async function GET(_req: NextRequest, { params }: Params) {
   if (!agent) return error("Agent not found", 404);
   const orgUser = await prisma.user.findFirst({
     where: { orgAgentId: id, role: "ORG" },
-    select: { email: true, orgName: true, orgUnp: true, planName: true, planMonthlyPrice: true },
+    select: {
+      email: true,
+      orgName: true,
+      orgUnp: true,
+      planName: true,
+      planMonthlyPrice: true,
+      salesEnabled: true,
+      salesPlanName: true,
+      salesPlanMonthlyPrice: true,
+      salesPlaybookLimit: true,
+      salesAgentLimit: true,
+    },
   });
   const payload = {
     ...agent,
@@ -37,6 +48,11 @@ export async function GET(_req: NextRequest, { params }: Params) {
     orgUnp: orgUser?.orgUnp ?? "",
     planName: orgUser?.planName ?? "",
     planMonthlyPrice: orgUser?.planMonthlyPrice ?? 0,
+    salesEnabled: orgUser?.salesEnabled ?? false,
+    salesPlanName: orgUser?.salesPlanName ?? "",
+    salesPlanMonthlyPrice: orgUser?.salesPlanMonthlyPrice ?? 0,
+    salesPlaybookLimit: orgUser?.salesPlaybookLimit ?? 0,
+    salesAgentLimit: orgUser?.salesAgentLimit ?? 1,
   };
   if (staff.role === "ORG") {
     payload.model = "";
@@ -70,6 +86,7 @@ const updateSchema = z.object({
   dailyRequestLimit: z.number().int().min(0).max(1_000_000).optional(),
   monthlyRequestLimit: z.number().int().min(0).max(1_000_000).optional(),
   enabled: z.boolean().optional(),
+  webSearchEnabled: z.boolean().optional(),
   isPrimary: z.boolean().optional(),
   skillIds: z.array(z.string()).optional(),
   /** Full assignment with order/visibility for the agent */

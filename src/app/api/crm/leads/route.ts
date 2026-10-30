@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { error, json, writeLog } from "@/lib/api";
 import { CRM_STAGES, crmPlaybookForAgent, leadIdentities } from "@/lib/crm";
+import { listPlaybookLeads } from "@/lib/crmLeadsList";
 
 export const dynamic = "force-dynamic";
 
@@ -29,22 +30,22 @@ export async function GET(req: NextRequest) {
   );
   if (playbook instanceof Response) return playbook;
 
-  const leads = await prisma.salesLead.findMany({
-    where: { playbookId },
-    orderBy: [{ updatedAt: "desc" }],
-    include: {
-      conversations: {
-        orderBy: { lastMessageAt: "desc" },
-        take: 1,
-        include: {
-          messages: { orderBy: { createdAt: "desc" }, take: 1 },
-        },
-      },
-      _count: { select: { conversations: true } },
-    },
-  });
+  const leads = await listPlaybookLeads(playbookId);
 
-  return json({ playbook, stages: CRM_STAGES, leads });
+  return json({
+    playbook: {
+      id: playbook.id,
+      name: playbook.name,
+      status: playbook.status,
+      sendMode: playbook.sendMode,
+      channelTelegramEnabled: playbook.channelTelegramEnabled,
+      channelEmailEnabled: playbook.channelEmailEnabled,
+      replyCount: playbook.replyCount,
+      replySpendUsd: playbook.replySpendUsd,
+    },
+    stages: CRM_STAGES,
+    leads,
+  });
 }
 
 export async function POST(req: NextRequest) {

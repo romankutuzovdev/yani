@@ -4,13 +4,19 @@ import path from "path";
 import JSZip from "jszip";
 import pdf from "pdf-parse/lib/pdf-parse.js";
 import { extractDocxText } from "@/lib/docx";
+import { isCrmImageMime } from "@/lib/crmMedia";
 
-export const MAX_CRM_DOCUMENTS = 15;
+export const MAX_CRM_DOCUMENTS = 20;
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   pdf: "application/pdf",
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
 };
 
 function decodeXml(value: string) {
@@ -60,11 +66,20 @@ export async function extractCrmDocumentText(extension: string, buffer: Buffer) 
     return clampCrmDocumentText(result.text ?? "");
   }
   if (extension === "pptx") return extractPptxText(buffer);
-  throw new Error("Поддерживаются только DOCX, PDF и PPTX");
+  throw new Error("Поддерживаются только DOCX, PDF, PPTX и изображения");
+}
+
+function imageCatalogText(originalName: string, url: string, mimeType: string) {
+  return [
+    `[IMAGE] ${originalName}`,
+    `mime: ${mimeType}`,
+    `url: ${url}`,
+    "Картинка-вложение: отправляется клиенту файлом, если в промпте/ответе указано это имя или маркер [[IMAGE:имя]] / [[FILE:имя]]. Не является текстом для обучения.",
+  ].join("\n");
 }
 
 export async function saveCrmDocument(file: File) {
-  const max = Number(process.env.MAX_UPLOAD_DOC_BYTES ?? 15_728_640);
+  const max = Number(process.env.MAX_UPLOAD_DOC_BYTES ?? 83_886_080); // 80MB
   if (file.size > max) {
     throw new Error(`Файл больше ${Math.round(max / 1024 / 1024)} МБ`);
   }
@@ -72,23 +87,28 @@ export async function saveCrmDocument(file: File) {
   const originalName = (file.name || "document").split(/[/\\]/).pop() || "document";
   const extension = originalName.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
   if (!(extension in MIME_BY_EXTENSION)) {
-    throw new Error("Поддерживаются только DOCX, PDF и PPTX");
+    throw new Error("Поддерживаются DOCX, PDF, PPTX и картинки PNG/JPG/WEBP/GIF");
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const text = await extractCrmDocumentText(extension, buffer);
+  const mimeType = MIME_BY_EXTENSION[extension]!;
   const dir = path.join(process.cwd(), process.env.UPLOAD_DIR ?? "uploads", "crm-documents");
   await mkdir(dir, { recursive: true });
   const fileName = `${Date.now()}-${randomBytes(6).toString("hex")}.${extension}`;
   const fullPath = path.join(dir, fileName);
   await writeFile(fullPath, buffer);
+  const url = `/uploads/crm-documents/${fileName}`;
+
+  const text = isCrmImageMime(mimeType)
+    ? imageCatalogText(originalName, url, mimeType)
+    : await extractCrmDocumentText(extension, buffer);
 
   return {
     originalName,
-    mimeType: MIME_BY_EXTENSION[extension]!,
+    mimeType,
     sizeBytes: file.size,
     text,
-    url: `/uploads/crm-documents/${fileName}`,
+    url,
     fullPath,
   };
 }

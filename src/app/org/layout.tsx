@@ -11,7 +11,10 @@ export default async function OrgLayout({ children }: { children: React.ReactNod
 
   const user = await prisma.user.findUnique({
     where: { id: session.id },
-    select: { orgAgent: { select: { slug: true } } },
+    select: {
+      salesEnabled: true,
+      orgAgent: { select: { slug: true } },
+    },
   });
   const slug = user?.orgAgent?.slug;
 
@@ -20,6 +23,7 @@ export default async function OrgLayout({ children }: { children: React.ReactNod
       area="org"
       userName={session.name || session.email}
       chatHref={slug ? `/chat?slug=${encodeURIComponent(slug)}` : "/chat"}
+      salesEnabled={Boolean(user?.salesEnabled)}
     >
       {children}
     </AdminShell>

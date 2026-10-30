@@ -1,0 +1,23 @@
+[Unit]
+Description=Yani Next.js app
+After=network.target
+Wants=yani-crm-email.service yani-crm-telegram.service yani-crm-worker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/www/yani
+Environment=NODE_ENV=production
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=3000
+EnvironmentFile=-/var/www/yani/.env
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=20
+StandardOutput=append:/var/log/yani-app.log
+StandardError=append:/var/log/yani-app.log
+
+[Install]
+WantedBy=multi-user.target

@@ -2,6 +2,19 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { error, requireCabinet } from "@/lib/api";
 
+/** Organization CRM is available only when admin enabled sales on org access. Admins always pass. */
+export async function assertCrmSalesAccess(agentId: string, orgAgentId: string | null) {
+  if (!orgAgentId) return true;
+  const org = await prisma.user.findFirst({
+    where: { orgAgentId: agentId, role: "ORG" },
+    select: { salesEnabled: true },
+  });
+  if (!org?.salesEnabled) {
+    return error("CRM продаж не подключён. Обратитесь к администратору Yani.", 403);
+  }
+  return true;
+}
+
 export const CRM_STAGES = [
   "NEW",
   "COMMUNICATING",
@@ -64,7 +77,11 @@ export async function resolveCrmAgentId(requestedAgentId?: string | null): Promi
   const cabinet = await requireCabinet();
   if (cabinet instanceof NextResponse) return cabinet;
 
-  if (cabinet.orgAgentId) return cabinet.orgAgentId;
+  if (cabinet.orgAgentId) {
+    const allowed = await assertCrmSalesAccess(cabinet.orgAgentId, cabinet.orgAgentId);
+    if (allowed instanceof NextResponse) return allowed;
+    return cabinet.orgAgentId;
+  }
 
   const requested = requestedAgentId?.trim();
   const agent = requested

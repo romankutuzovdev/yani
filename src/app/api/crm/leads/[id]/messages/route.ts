@@ -13,7 +13,7 @@ type Params = { params: Promise<{ id: string }> };
 const messageSchema = z.object({
   agentId: z.string().optional(),
   direction: z.enum(["INBOUND", "OUTBOUND"]),
-  channel: z.enum(["MANUAL", "TELEGRAM", "EMAIL"]).default("MANUAL"),
+  channel: z.enum(["MANUAL", "TELEGRAM", "EMAIL", "INSTAGRAM"]).default("MANUAL"),
   body: z.string().trim().min(1, "Введите сообщение").max(30_000),
 });
 
@@ -46,6 +46,19 @@ export async function POST(req: Request, { params }: Params) {
           })
         : null;
     let emailThreadId = "";
+    const instagramConnection =
+      body.channel === "INSTAGRAM"
+        ? await prisma.crmChannelConnection.findUnique({
+            where: { playbookId_type: { playbookId: lead.playbookId, type: "INSTAGRAM" } },
+          })
+        : null;
+    let instagramThreadId = "";
+    if (body.channel === "TELEGRAM" && lead.playbook.channelTelegramEnabled === false) {
+      return error("Telegram выключен в настройках навыка");
+    }
+    if (body.channel === "EMAIL" && lead.playbook.channelEmailEnabled === false) {
+      return error("Email выключен в настройках навыка");
+    }
     if (body.channel === "TELEGRAM" && !telegramConnection) {
       return error("Telegram не подключён к этому навыку");
     }
@@ -64,6 +77,17 @@ export async function POST(req: Request, { params }: Params) {
       if (!telegramThreadId) {
         return error("Укажите Telegram username клиента или дождитесь его входящего сообщения");
       }
+    }
+    if (body.channel === "INSTAGRAM" && instagramConnection?.status !== "CONNECTED") {
+      return error("Instagram не подключён к этому навыку");
+    }
+    if (body.channel === "INSTAGRAM" && body.direction === "OUTBOUND") {
+      const existing = await prisma.crmConversation.findUnique({
+        where: { leadId_channel: { leadId: id, channel: "INSTAGRAM" } },
+        select: { externalThreadId: true },
+      });
+      instagramThreadId = existing?.externalThreadId ?? "";
+      if (!instagramThreadId) return error("Сначала дождитесь входящего сообщения в Instagram Direct");
     }
     if (body.channel === "EMAIL" && body.direction === "OUTBOUND") {
       const existing = await prisma.crmConversation.findUnique({
@@ -88,7 +112,7 @@ export async function POST(req: Request, { params }: Params) {
         create: {
           leadId: id,
           channel: body.channel,
-          externalThreadId: telegramThreadId || emailThreadId,
+          externalThreadId: telegramThreadId || emailThreadId || instagramThreadId,
           externalContext:
             body.channel === "EMAIL"
               ? JSON.stringify({ subject: lead.playbook.product || "Предложение" })
@@ -97,8 +121,8 @@ export async function POST(req: Request, { params }: Params) {
         },
         update: {
           lastMessageAt: now,
-          ...(telegramThreadId || emailThreadId
-            ? { externalThreadId: telegramThreadId || emailThreadId }
+          ...(telegramThreadId || emailThreadId || instagramThreadId
+            ? { externalThreadId: telegramThreadId || emailThreadId || instagramThreadId }
             : {}),
         },
       });
@@ -110,7 +134,7 @@ export async function POST(req: Request, { params }: Params) {
           body: body.body,
         },
       });
-      const deliveryConnection = telegramConnection ?? emailConnection;
+      const deliveryConnection = telegramConnection ?? emailConnection ?? instagramConnection;
       if (body.direction === "OUTBOUND" && deliveryConnection) {
         const outboxStatus = outboxStatusForSendMode(lead.playbook.sendMode);
         await tx.crmOutboxMessage.create({

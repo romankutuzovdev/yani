@@ -12,20 +12,8 @@ export async function getCrmHealth() {
     databaseError = cause instanceof Error ? cause.message : "db error";
   }
 
-  let redis: Awaited<ReturnType<typeof pingCrmRedis>> = {
-    status: "disabled",
-    error: "redis check skipped",
-  };
-  try {
-    redis = await pingCrmRedis();
-  } catch (cause) {
-    redis = {
-      status: "disabled",
-      error: cause instanceof Error ? cause.message : "redis check failed",
-    };
-  }
-
   const [
+    redis,
     outboxDraft,
     outboxApproved,
     outboxSending,
@@ -37,6 +25,10 @@ export async function getCrmHealth() {
     deadLettersOpen,
     connections,
   ] = await Promise.all([
+    pingCrmRedis().catch((cause) => ({
+      status: "disabled" as const,
+      error: cause instanceof Error ? cause.message : "redis check failed",
+    })),
     prisma.crmOutboxMessage.count({ where: { status: "DRAFT" } }),
     prisma.crmOutboxMessage.count({ where: { status: "APPROVED" } }),
     prisma.crmOutboxMessage.count({ where: { status: "SENDING" } }),

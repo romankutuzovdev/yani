@@ -2,7 +2,15 @@ import { prisma } from "@/lib/db";
 import { json, requireAdmin } from "@/lib/api";
 import { formatUsd, getPricedModels } from "@/llm/pricing";
 import type { LLMModelInfo } from "@/llm";
-import { minskDayKey, parseUsageBucket, startOfMinskDay, startOfMinskMonth, usagePeriod } from "@/lib/minskTime";
+import {
+  minskDayBounds,
+  minskDayKey,
+  minskDayLabel,
+  parseUsageBucket,
+  startOfMinskDay,
+  startOfMinskMonth,
+  usagePeriod,
+} from "@/lib/minskTime";
 
 function startOfDay() {
   return startOfMinskDay();
@@ -28,6 +36,8 @@ export async function GET(req: Request) {
   const agentId = url.searchParams.get("agentId") || undefined;
   const range = url.searchParams.get("range") || "all";
   const bucket = parseUsageBucket(url.searchParams.get("bucket"));
+  const dayParam = url.searchParams.get("day")?.trim() || "";
+  const dayBounds = dayParam ? minskDayBounds(dayParam) : null;
 
   let models: LLMModelInfo[] = [];
   try {
@@ -36,7 +46,10 @@ export async function GET(req: Request) {
     models = [];
   }
 
-  const where = agentId ? { agentId } : {};
+  const where = {
+    provider: { not: "yandex" },
+    ...(agentId ? { agentId } : {}),
+  };
   const [rows, agents] = await Promise.all([
     prisma.usageRecord.findMany({
       where,
@@ -61,9 +74,19 @@ export async function GET(req: Request) {
   const todayRows = rows.filter((r) => r.createdAt >= day);
   const monthRows = rows.filter((r) => r.createdAt >= month);
 
-  const since =
-    range === "today" ? day : range === "month" ? month : null;
-  const scoped = since ? rows.filter((row) => row.createdAt >= since) : rows;
+  const since = dayBounds
+    ? dayBounds.start
+    : range === "today"
+      ? day
+      : range === "month"
+        ? month
+        : null;
+  const until = dayBounds ? dayBounds.end : null;
+  const scoped = rows.filter((row) => {
+    if (since && row.createdAt < since) return false;
+    if (until && row.createdAt >= until) return false;
+    return true;
+  });
 
   type Bucket = { requests: number; inputTokens: number; outputTokens: number; cost: number };
   const emptyBucket = (): Bucket => ({ requests: 0, inputTokens: 0, outputTokens: 0, cost: 0 });
@@ -244,6 +267,7 @@ export async function GET(req: Request) {
     })
     .sort((a, b) => b.key.localeCompare(a.key) || a.agentName.localeCompare(b.agentName, "ru"));
 
+  const selectedCost = dayBounds ? sumCost(scoped) : null;
   const totals = {
     all: sumCost(rows),
     today: sumCost(todayRows),
@@ -254,7 +278,11 @@ export async function GET(req: Request) {
     inputTokens: scopedTokens.input,
     outputTokens: scopedTokens.output,
     totalTokens: scopedTokens.input + scopedTokens.output,
-    range,
+    range: dayBounds ? "day" : range,
+    selectedDay: dayBounds ? dayParam : null,
+    selectedDayLabel: dayBounds ? minskDayLabel(dayParam) : null,
+    selectedDayRequests: dayBounds ? scoped.length : null,
+    selectedDayCost: selectedCost,
   };
 
   return json({
@@ -264,6 +292,7 @@ export async function GET(req: Request) {
       allLabel: formatUsd(totals.all),
       todayLabel: formatUsd(totals.today),
       monthLabel: formatUsd(totals.month),
+      selectedDayCostLabel: selectedCost == null ? null : formatUsd(selectedCost),
     },
     byModel,
     byAgent,

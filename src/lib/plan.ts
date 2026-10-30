@@ -7,6 +7,26 @@ export function formatPlanLine(planName: string, price: number, monthlyLimit: nu
   return `${name}: ${amount} в месяц, ${limit}`;
 }
 
+/** Sales CRM tariff line for the organization cabinet. */
+export function formatSalesPlanLine(input: {
+  enabled: boolean;
+  planName: string;
+  price: number;
+  playbookLimit: number;
+  agentLimit: number;
+}) {
+  if (!input.enabled) return "";
+  const name = input.planName.trim() || "Продажи";
+  const amount = formatPlanPrice(input.price);
+  const playbooks =
+    input.playbookLimit > 0
+      ? `до ${input.playbookLimit} навыков продаж`
+      : "навыки продаж без лимита";
+  const agents =
+    input.agentLimit > 0 ? `до ${input.agentLimit} агентов` : "агенты без лимита";
+  return `${name}: ${amount} в месяц, ${playbooks}, ${agents}`;
+}
+
 export function formatPlanPrice(value: number) {
   if (!Number.isFinite(value) || value < 0) return "0";
   const rounded = Math.round(value * 100) / 100;

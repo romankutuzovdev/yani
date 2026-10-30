@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ModelSelect } from "@/components/ModelSelect";
 import { formatExact } from "@/lib/money";
 import { PagedRows } from "@/components/PagedRows";
+import { minskDayKey } from "@/lib/minskTime";
 
 type Usage = {
   totals: {
@@ -15,6 +16,10 @@ type Usage = {
     requests: number;
     todayRequests: number;
     monthRequests: number;
+    selectedDay?: string | null;
+    selectedDayLabel?: string | null;
+    selectedDayRequests?: number | null;
+    selectedDayCostLabel?: string | null;
   };
   byModel: Array<{
     model: string;
@@ -78,6 +83,22 @@ export default function SettingsPage() {
   const [newPassword2, setNewPassword2] = useState("");
   const [accountNote, setAccountNote] = useState("");
   const [accountSaving, setAccountSaving] = useState(false);
+  const [yandexKey, setYandexKey] = useState("");
+  const [yandexFolder, setYandexFolder] = useState("");
+  const [yandexDayPrice, setYandexDayPrice] = useState("488");
+  const [yandexNightPrice, setYandexNightPrice] = useState("366");
+  const [yandexHint, setYandexHint] = useState("");
+  const [yandexSource, setYandexSource] = useState<"admin" | "env" | "none">("none");
+  const [yandexNote, setYandexNote] = useState("");
+  const [yandexSaving, setYandexSaving] = useState(false);
+  const [yandexSpend, setYandexSpend] = useState<{
+    today: { label: string; requests: number };
+    month: { label: string; requests: number };
+    all: { label: string; requests: number };
+    selected?: { label: string; requests: number; day: string; dayLabel: string };
+  } | null>(null);
+  const [yandexDay, setYandexDay] = useState(() => minskDayKey(new Date()));
+  const [usageDay, setUsageDay] = useState(() => minskDayKey(new Date()));
 
   useEffect(() => {
     if (!orgMode) {
@@ -98,15 +119,6 @@ export default function SettingsPage() {
           setProvider(d.provider ?? "vibecode");
           setProviderOptions(d.options ?? []);
         });
-      void fetch("/api/llm/usage")
-        .then(async (r) => {
-          const data = await r.json();
-          if (!r.ok) throw new Error(data.error ?? "Не удалось посчитать расходы");
-          setUsage(data);
-        })
-        .catch((e: unknown) => {
-          setUsageError(e instanceof Error ? e.message : "Не удалось посчитать расходы");
-        });
     }
     void fetch("/api/site/seo")
       .then((r) => r.json())
@@ -115,6 +127,46 @@ export default function SettingsPage() {
         if (d.sitemapUrl) setSitemapUrl(d.sitemapUrl);
       });
   }, [orgMode]);
+
+  useEffect(() => {
+    if (orgMode) return;
+    let cancelled = false;
+    void fetch(`/api/admin/yandex-search?day=${encodeURIComponent(yandexDay)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled || !d.settings) return;
+        setYandexFolder(d.settings.folderId ?? "");
+        setYandexDayPrice(String(d.settings.dayRubPer1000 ?? 488));
+        setYandexNightPrice(String(d.settings.nightRubPer1000 ?? 366));
+        setYandexHint(d.settings.keyHint ?? "");
+        setYandexSource(d.settings.source ?? "none");
+        setYandexSpend(d.spend ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [orgMode, yandexDay]);
+
+  useEffect(() => {
+    if (orgMode) return;
+    let cancelled = false;
+    setUsageError("");
+    void fetch(`/api/llm/usage?day=${encodeURIComponent(usageDay)}`)
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error ?? "Не удалось посчитать расходы");
+        if (!cancelled) setUsage(data);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setUsageError(e instanceof Error ? e.message : "Не удалось посчитать расходы");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgMode, usageDay]);
 
   async function saveAccount() {
     setAccountNote("");
@@ -194,6 +246,36 @@ export default function SettingsPage() {
         ? "Сейчас ответы идут через hoster.by AI (qwen3.8-27b)."
         : `Сейчас провайдер: ${data.provider ?? next}`,
     );
+  }
+
+  async function saveYandex() {
+    setYandexNote("");
+    setYandexSaving(true);
+    try {
+      const res = await fetch("/api/admin/yandex-search", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey: yandexKey.trim() || undefined,
+          folderId: yandexFolder,
+          dayRubPer1000: Number(yandexDayPrice.replace(",", ".")) || 0,
+          nightRubPer1000: Number(yandexNightPrice.replace(",", ".")) || 0,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setYandexNote(data.error ?? "Не удалось сохранить");
+        return;
+      }
+      setYandexKey("");
+      setYandexFolder(data.settings?.folderId ?? yandexFolder);
+      setYandexHint(data.settings?.keyHint ?? "");
+      setYandexSource(data.settings?.source ?? "none");
+      setYandexSpend(data.spend ?? null);
+      setYandexNote("Ключи Яндекса сохранены");
+    } finally {
+      setYandexSaving(false);
+    }
   }
 
   async function saveSeo() {
@@ -403,6 +485,119 @@ export default function SettingsPage() {
       {!orgMode && (
       <>
       <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
+        <h2 className="font-medium text-slate-900">Яндекс Поиск</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          API-ключ сервисного аккаунта (scope yc.search-api.execute) и ID каталога. Ключ хранится
+          зашифрованным. Расход считается по успешным запросам синхронного поиска: днём и ночью
+          (00:00–07:59 по Москве) разные тарифы.
+        </p>
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="text-sm text-slate-700">
+            День (календарь, Минск)
+            <input
+              type="date"
+              className={fieldClass}
+              value={yandexDay}
+              max={minskDayKey(new Date())}
+              onChange={(e) => setYandexDay(e.target.value || minskDayKey(new Date()))}
+            />
+          </label>
+          <button
+            type="button"
+            className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-violet-700 hover:bg-violet-50"
+            onClick={() => {
+              const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+              setYandexDay(minskDayKey(yesterday));
+            }}
+          >
+            Вчера
+          </button>
+          <button
+            type="button"
+            className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-violet-700 hover:bg-violet-50"
+            onClick={() => setYandexDay(minskDayKey(new Date()))}
+          >
+            Сегодня
+          </button>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            [
+              yandexSpend?.selected?.dayLabel ?? "Выбранный день",
+              yandexSpend?.selected?.label,
+              yandexSpend?.selected?.requests,
+            ],
+            ["Сегодня", yandexSpend?.today.label, yandexSpend?.today.requests],
+            ["Этот месяц", yandexSpend?.month.label, yandexSpend?.month.requests],
+            ["Всего", yandexSpend?.all.label, yandexSpend?.all.requests],
+          ].map(([label, money, requests]) => (
+            <div key={String(label)} className="rounded-xl border border-amber-100 bg-amber-50/50 px-4 py-3">
+              <p className="text-xs uppercase tracking-wider text-slate-500">{label}</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">{money ?? "—"}</p>
+              <p className="mt-1 text-xs text-slate-500">{requests ?? "—"} запросов</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <label className="block text-sm text-slate-700">
+            API-ключ
+            <input
+              className={fieldClass}
+              type="password"
+              autoComplete="off"
+              value={yandexKey}
+              onChange={(e) => setYandexKey(e.target.value)}
+              placeholder={yandexHint ? `Сохранён ${yandexHint}` : "Вставьте ключ"}
+            />
+          </label>
+          <label className="block text-sm text-slate-700">
+            ID каталога (folder id)
+            <input
+              className={fieldClass}
+              value={yandexFolder}
+              onChange={(e) => setYandexFolder(e.target.value)}
+              placeholder="b1g..."
+            />
+          </label>
+          <label className="block text-sm text-slate-700">
+            ₽ за 1000 запросов днём
+            <input
+              className={fieldClass}
+              inputMode="decimal"
+              value={yandexDayPrice}
+              onChange={(e) => setYandexDayPrice(e.target.value)}
+            />
+          </label>
+          <label className="block text-sm text-slate-700">
+            ₽ за 1000 запросов ночью
+            <input
+              className={fieldClass}
+              inputMode="decimal"
+              value={yandexNightPrice}
+              onChange={(e) => setYandexNightPrice(e.target.value)}
+            />
+          </label>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">
+          {yandexSource === "admin"
+            ? "Сейчас используется ключ из админки."
+            : yandexSource === "env"
+              ? "Ключ пока берётся из .env на сервере. Сохранение здесь его заменит."
+              : "Ключ ещё не задан."}
+          {yandexHint ? ` Последние символы: ${yandexHint}.` : ""} Пустое поле ключа его не стирает.
+        </p>
+        <button
+          type="button"
+          disabled={yandexSaving || !yandexFolder.trim()}
+          onClick={() => void saveYandex()}
+          className="mt-3 rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50"
+        >
+          {yandexSaving ? "Сохраняю…" : "Сохранить Яндекс"}
+        </button>
+        {yandexNote && <p className="mt-2 text-sm text-slate-600">{yandexNote}</p>}
+      </section>
+
+      <section className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
         <h2 className="font-medium text-slate-900">Провайдер ИИ</h2>
         <p className="mt-1 text-sm text-slate-500">
           vibecode.moe или ИИ hoster.by. Ключ hoster берётся из HOSTER_API_KEY на сервере.
@@ -452,8 +647,39 @@ export default function SettingsPage() {
         {message && <p className="mt-2 text-sm text-slate-600">{message}</p>}
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-3">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-sm text-slate-700">
+          День расходов LLM (календарь, Минск)
+          <input
+            type="date"
+            className={fieldClass}
+            value={usageDay}
+            max={minskDayKey(new Date())}
+            onChange={(e) => setUsageDay(e.target.value || minskDayKey(new Date()))}
+          />
+        </label>
+        <button
+          type="button"
+          className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-violet-700 hover:bg-violet-50"
+          onClick={() => setUsageDay(minskDayKey(new Date(Date.now() - 24 * 60 * 60 * 1000)))}
+        >
+          Вчера
+        </button>
+        <button
+          type="button"
+          className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-violet-700 hover:bg-violet-50"
+          onClick={() => setUsageDay(minskDayKey(new Date()))}
+        >
+          Сегодня
+        </button>
+      </div>
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
+          [
+            usage?.totals.selectedDayLabel ?? "Выбранный день",
+            usage?.totals.selectedDayCostLabel,
+            usage?.totals.selectedDayRequests,
+          ],
           ["Сегодня", usage?.totals.todayLabel, usage?.totals.todayRequests],
           ["Этот месяц", usage?.totals.monthLabel, usage?.totals.monthRequests],
           ["Всего", usage?.totals.allLabel, usage?.totals.requests],

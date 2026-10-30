@@ -11,6 +11,11 @@ const profileSchema = z.object({
   orgUnp: z.string().trim().max(32).optional(),
   planName: z.string().trim().max(120).optional(),
   planMonthlyPrice: z.number().min(0).max(1_000_000_000).optional(),
+  salesEnabled: z.boolean().optional(),
+  salesPlanName: z.string().trim().max(120).optional(),
+  salesPlanMonthlyPrice: z.number().min(0).max(1_000_000_000).optional(),
+  salesPlaybookLimit: z.number().int().min(0).max(10_000).optional(),
+  salesAgentLimit: z.number().int().min(1).max(10_000).optional(),
 });
 
 export async function POST(req: NextRequest, { params }: Params) {
@@ -24,7 +29,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   await writeLog({
     type: "agent",
-    message: `Issued organization access ${issued.email}`,
+    message: `Issued organization access ${issued.email}${issued.salesEnabled ? " + CRM продаж" : ""}`,
     agentId: id,
     userId: admin.id,
   });
@@ -53,7 +58,18 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { id } = await params;
   const user = await prisma.user.findFirst({
     where: { orgAgentId: id, role: "ORG" },
-    select: { email: true, orgName: true, orgUnp: true, planName: true, planMonthlyPrice: true },
+    select: {
+      email: true,
+      orgName: true,
+      orgUnp: true,
+      planName: true,
+      planMonthlyPrice: true,
+      salesEnabled: true,
+      salesPlanName: true,
+      salesPlanMonthlyPrice: true,
+      salesPlaybookLimit: true,
+      salesAgentLimit: true,
+    },
   });
   return json({
     email: user?.email ?? "",
@@ -61,5 +77,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
     orgUnp: user?.orgUnp ?? "",
     planName: user?.planName ?? "",
     planMonthlyPrice: user?.planMonthlyPrice ?? 0,
+    salesEnabled: user?.salesEnabled ?? false,
+    salesPlanName: user?.salesPlanName ?? "",
+    salesPlanMonthlyPrice: user?.salesPlanMonthlyPrice ?? 0,
+    salesPlaybookLimit: user?.salesPlaybookLimit ?? 0,
+    salesAgentLimit: user?.salesAgentLimit ?? 1,
   });
 }

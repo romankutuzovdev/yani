@@ -7,6 +7,7 @@ import {
   MAX_CRM_DOCUMENTS,
   saveCrmDocument,
 } from "@/lib/crmDocuments";
+import { isCrmImageDoc } from "@/lib/crmMedia";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -22,6 +23,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   return json({
     documents: documents.map(({ text, ...document }) => ({
       ...document,
+      isImage: isCrmImageDoc(document),
       textLength: text.length,
       textPreview: text.slice(0, 1200),
     })),
@@ -73,6 +75,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       document: {
         ...document,
         text: undefined,
+        isImage: isCrmImageDoc(document),
         textLength: document.text.length,
         textPreview: document.text.slice(0, 1200),
       },

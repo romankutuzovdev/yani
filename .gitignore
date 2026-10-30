@@ -43,6 +43,11 @@ yarn-error.log*
 *.db
 *.db-journal
 
+# runtime secrets / local settings (API keys, provider overrides)
+prisma/data/yandex-search.json
+prisma/data/llm-settings.json
+prisma/data/site-seo.json
+
 # vercel
 .vercel
 

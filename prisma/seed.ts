@@ -67,7 +67,7 @@ async function main() {
       name: "Web Research",
       description: "Research topics on the web and summarize findings.",
       systemPrompt: "Cite sources when available. Prefer factual summaries.",
-      tools: ["web_search", "http_request"],
+      tools: ["web_search", "web_research", "fetch_page", "http_request"],
       sortOrder: 1,
     },
     {

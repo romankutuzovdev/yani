@@ -43,8 +43,14 @@ export default function AgentsPage() {
 
   async function load() {
     const res = await fetch("/api/agents");
-    const data = await res.json();
-    setAgents(data.agents ?? []);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setAgents([]);
+      setNotice(data.error ?? "Не удалось загрузить агентов");
+      return;
+    }
+    setNotice("");
+    setAgents(Array.isArray(data.agents) ? data.agents : []);
   }
 
   useEffect(() => {
@@ -58,7 +64,8 @@ export default function AgentsPage() {
         setSpent(map);
       })
       .catch(() => setSpent({}));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgMode]);
 
   async function copyAgent(id: string) {
     setBusyId(id);

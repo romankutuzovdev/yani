@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ExternalLink, FileText, Mail, MessageCircle, Trash2, Upload, X } from "lucide-react";
+import { Download, FileText, ImageIcon, Instagram, Mail, MessageCircle, Trash2, Upload, X } from "lucide-react";
+import { fileDownloadUrl } from "@/lib/downloadUrl";
 
 type PlaybookSetup = {
   id: string;
@@ -13,6 +14,9 @@ type PlaybookSetup = {
   restrictions: string;
   qualificationQuestions: string;
   sendMode: string;
+  channelTelegramEnabled?: boolean;
+  channelEmailEnabled?: boolean;
+  telegramSendIntervalSeconds?: number;
 };
 
 type SalesDocument = {
@@ -23,6 +27,7 @@ type SalesDocument = {
   sizeBytes: number;
   textLength: number;
   textPreview: string;
+  isImage?: boolean;
 };
 
 type TelegramConnection = {
@@ -43,6 +48,16 @@ type TelegramAccountConnection = {
   codeViaApp: boolean;
   delivery?: string;
   lastError: string;
+};
+
+type InstagramConnection = {
+  id: string;
+  status: string;
+  username: string;
+  igUserId: string;
+  lastError: string;
+  webhookUrl: string;
+  verifyToken: string;
 };
 
 type EmailConnection = {
@@ -70,16 +85,22 @@ export function SalesPlaybookSetup({
   agentId,
   onClose,
   onSaved,
+  onDeleted,
   onNotice,
 }: {
   playbook: PlaybookSetup;
   agentId: string;
   onClose: () => void;
   onSaved: (playbook: PlaybookSetup) => void;
+  onDeleted: () => void;
   onNotice: (message: string) => void;
 }) {
   const [draft, setDraft] = useState(playbook);
   const [documents, setDocuments] = useState<SalesDocument[]>([]);
+  const [instagram, setInstagram] = useState<InstagramConnection | null>(null);
+  const [instagramToken, setInstagramToken] = useState("");
+  const [instagramMessage, setInstagramMessage] = useState("");
+  const [instagramSetup, setInstagramSetup] = useState({ webhookUrl: "", verifyToken: "" });
   const [telegram, setTelegram] = useState<TelegramConnection | null>(null);
   const [telegramToken, setTelegramToken] = useState("");
   const [telegramAccount, setTelegramAccount] = useState<TelegramAccountConnection | null>(null);
@@ -131,6 +152,21 @@ export function SalesPlaybookSetup({
       setDocuments(data.documents ?? []);
     } catch {
       onNotice("Сервер CRM недоступен. Обновите страницу.");
+    }
+  }
+
+  async function loadInstagram() {
+    try {
+      const response = await fetch(`/api/crm/playbooks/${playbook.id}/instagram?${query}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) return;
+      setInstagram(data.connection ?? null);
+      setInstagramSetup({
+        webhookUrl: data.webhookUrl || data.connection?.webhookUrl || "",
+        verifyToken: data.verifyToken || data.connection?.verifyToken || "",
+      });
+    } catch {
+      /* ignore offline */
     }
   }
 
@@ -186,13 +222,60 @@ export function SalesPlaybookSetup({
   }
 
   useEffect(() => {
+    setDraft(playbook);
+    setDocuments([]);
+    setInstagram(null);
+    setTelegram(null);
+    setTelegramAccount(null);
+    setEmailConnection(null);
+    setPreview(null);
     void loadDocuments();
+    void loadInstagram();
     void loadTelegram();
     void loadTelegramAccount();
     void loadEmail();
     // playbook.id and agentId identify this modal instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playbook.id, agentId]);
+
+  async function connectInstagram() {
+    if (!instagramToken.trim()) {
+      setInstagramMessage("Сначала вставьте токен доступа Instagram.");
+      return;
+    }
+    setInstagramMessage("");
+    setBusy(true);
+    const { response, data, offline } = await crmFetch(`/api/crm/playbooks/${playbook.id}/instagram`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentId, token: instagramToken }),
+    });
+    setBusy(false);
+    if (offline || !response || !response.ok) {
+      const message = data.error ?? "Не удалось подключить Instagram";
+      setInstagramMessage(message);
+      onNotice(message);
+      return;
+    }
+    setInstagramToken("");
+    setInstagram(data.connection);
+    setInstagramMessage("");
+    onNotice(`Instagram @${data.connection.username || data.connection.igUserId} подключён`);
+  }
+
+  async function disconnectInstagram() {
+    if (!window.confirm("Отключить Instagram от этого навыка?")) return;
+    setBusy(true);
+    const response = await fetch(`/api/crm/playbooks/${playbook.id}/instagram?${query}`, { method: "DELETE" });
+    const data = await response.json();
+    setBusy(false);
+    if (!response.ok) {
+      onNotice(data.error ?? "Не удалось отключить Instagram");
+      return;
+    }
+    setInstagram(null);
+    onNotice("Instagram отключён");
+  }
 
   async function connectTelegram() {
     if (!telegramToken.trim()) return;
@@ -249,9 +332,10 @@ export function SalesPlaybookSetup({
       }
       setTelegramAccount(data.connection);
       onNotice(
-        data.connection.delivery === "SMS" || !data.connection.codeViaApp
-          ? "Код отправлен по SMS"
-          : "Код отправлен внутри Telegram: откройте чат «Telegram» на телефоне, где этот номер уже вошёл. Это не SMS.",
+        data.hint ??
+          (data.connection.delivery === "SMS" || !data.connection.codeViaApp
+            ? "Код отправлен по SMS"
+            : "Код в чате «Telegram» на телефоне (не SMS). Если нет — нажмите «Отправить ещё раз»."),
       );
     } catch {
       onNotice("Сервер недоступен. Обновите страницу и попробуйте снова.");
@@ -375,6 +459,28 @@ export function SalesPlaybookSetup({
     }));
   }
 
+  async function removePlaybook() {
+    const ok = window.confirm(
+      `Удалить навык «${playbook.name}»?\n\nБудут удалены все карточки клиентов, переписка, материалы и подключения каналов этого навыка. Это нельзя отменить.`,
+    );
+    if (!ok) return;
+    const typed = window.prompt(`Чтобы подтвердить, введите название навыка:\n${playbook.name}`);
+    if (typed !== playbook.name) {
+      if (typed !== null) onNotice("Название не совпало — навык не удалён");
+      return;
+    }
+    setBusy(true);
+    const response = await fetch(`/api/crm/playbooks/${playbook.id}?${query}`, { method: "DELETE" });
+    const data = await response.json().catch(() => ({}));
+    setBusy(false);
+    if (!response.ok) {
+      onNotice(data.error ?? "Не удалось удалить навык");
+      return;
+    }
+    onNotice(`Навык «${playbook.name}» удалён`);
+    onDeleted();
+  }
+
   async function save() {
     setBusy(true);
     const response = await fetch(`/api/crm/playbooks/${playbook.id}`, {
@@ -466,6 +572,11 @@ export function SalesPlaybookSetup({
             <label className="block text-sm text-slate-700">
               Как агент должен общаться
               <textarea rows={4} className={fieldClass} value={draft.systemPrompt} onChange={(event) => setDraft({ ...draft, systemPrompt: event.target.value })} />
+              <span className="mt-1 block text-xs text-slate-500">
+                Документы из Telegram: «Анализируй документы и файлы, которые присылает клиент».
+                Поиск в интернете по промпту (без галочки у агента): «Ищи информацию в интернете и на сайтах…».
+                Либо включите галочку «Поиск в интернете» у агента — тогда ищет всегда.
+              </span>
             </label>
             <label className="block text-sm text-slate-700">
               Цели
@@ -487,6 +598,33 @@ export function SalesPlaybookSetup({
                 <option value="AUTO">Автоматическая отправка</option>
               </select>
             </label>
+            <fieldset className="rounded-xl border border-violet-100 bg-violet-50/40 px-3 py-3">
+              <legend className="px-1 text-sm font-medium text-slate-800">Каналы общения</legend>
+              <p className="mb-2 text-xs text-slate-500">Можно включить один канал или оба сразу.</p>
+              <div className="flex flex-wrap gap-4">
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-violet-300 text-violet-600 focus:ring-violet-200"
+                    checked={draft.channelTelegramEnabled !== false}
+                    onChange={(event) => setDraft({ ...draft, channelTelegramEnabled: event.target.checked })}
+                  />
+                  Telegram
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-violet-300 text-violet-600 focus:ring-violet-200"
+                    checked={draft.channelEmailEnabled !== false}
+                    onChange={(event) => setDraft({ ...draft, channelEmailEnabled: event.target.checked })}
+                  />
+                  Email
+                </label>
+              </div>
+              {draft.channelTelegramEnabled === false && draft.channelEmailEnabled === false && (
+                <p className="mt-2 text-xs text-amber-700">Сейчас оба канала выключены — агент не будет отвечать клиентам в Telegram и Email.</p>
+              )}
+            </fieldset>
             <label className="block text-sm text-slate-700">
               Квалифицирующие вопросы
               <textarea
@@ -497,12 +635,75 @@ export function SalesPlaybookSetup({
                 placeholder="Например: сколько менеджеров, какой объём обращений, когда нужен запуск"
               />
             </label>
-            <button type="button" disabled={busy || !draft.name.trim()} onClick={() => void save()} className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white disabled:bg-slate-200">
-              Сохранить настройки
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" disabled={busy || !draft.name.trim()} onClick={() => void save()} className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white disabled:bg-slate-200">
+                Сохранить настройки
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void removePlaybook()}
+                className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+              >
+                <Trash2 size={15} />
+                Удалить навык
+              </button>
+            </div>
           </div>
 
           <div>
+            <div className="mb-4 rounded-2xl border border-pink-200 bg-pink-50/60 p-4">
+              <div className="flex items-center gap-2">
+                <Instagram size={18} className="text-pink-600" />
+                <h3 className="font-medium text-slate-900">Instagram Direct</h3>
+              </div>
+              <p className="mt-1 text-xs text-slate-600">
+                Ответы на входящие сообщения. Холодные рассылки в Direct не отправляются. Пока приложение Meta не опубликовано, писать может только тестовый аккаунт.
+              </p>
+              <div className="mt-3 space-y-2 text-xs text-slate-600">
+                <p>Адрес вебхука в Meta</p>
+                <code className="block break-all rounded-lg bg-white px-2 py-1 text-[11px] text-slate-800">
+                  {instagramSetup.webhookUrl || "https://yani.by/api/crm/instagram/webhook"}
+                </code>
+                <p>Маркер подтверждения</p>
+                <code className="block break-all rounded-lg bg-white px-2 py-1 text-[11px] text-slate-800">
+                  {instagramSetup.verifyToken || "откройте навык ещё раз"}
+                </code>
+              </div>
+              {instagram ? (
+                <div className="mt-3">
+                  <p className="text-sm font-medium text-slate-800">
+                    @{instagram.username || instagram.igUserId} · {instagram.status}
+                  </p>
+                  {instagram.lastError && <p className="mt-2 text-xs text-rose-600">{instagram.lastError}</p>}
+                  <p className="mt-2 text-xs text-slate-500">
+                    Навык должен быть запущен. В режиме «Автоматическая отправка» ответ уйдёт сам. В остальных режимах черновик появится в карточке, и его нужно подтвердить.
+                  </p>
+                  <button type="button" disabled={busy} onClick={() => void disconnectInstagram()} className="mt-3 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm text-rose-700">
+                    Отключить
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <p className="mt-3 text-xs text-slate-500">
+                    Нужен токен доступа аккаунта из сценария Instagram в Meta. Маркер подтверждения выше и секрет приложения сюда не подходят.
+                  </p>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    className={fieldClass}
+                    value={instagramToken}
+                    onChange={(event) => setInstagramToken(event.target.value)}
+                    placeholder="Токен Instagram"
+                  />
+                  <button type="button" disabled={busy} onClick={() => void connectInstagram()} className="mt-2 rounded-xl bg-pink-600 px-3 py-2 text-sm font-medium text-white disabled:bg-slate-200">
+                    {busy ? "Проверяем…" : "Проверить и подключить"}
+                  </button>
+                  {instagramMessage && <p className="mt-2 text-xs text-rose-700">{instagramMessage}</p>}
+                </>
+              )}
+            </div>
+
             <div className="mb-4 rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
               <div className="flex items-center gap-2">
                 <MessageCircle size={18} className="text-sky-600" />
@@ -548,6 +749,29 @@ export function SalesPlaybookSetup({
               )}
             </div>
 
+            <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
+              <h3 className="font-medium text-slate-900">Интервал исходящих Telegram</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Пауза между отправками из очереди этого навыка (бот и аккаунт). Например 300 = раз в 5 минут.
+              </p>
+              <label className="mt-2 block text-sm text-slate-600">
+                Секунды
+                <input
+                  type="number"
+                  min={10}
+                  max={86400}
+                  className={fieldClass}
+                  value={draft.telegramSendIntervalSeconds ?? 300}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      telegramSendIntervalSeconds: Number(event.target.value) || 300,
+                    })
+                  }
+                />
+              </label>
+            </div>
+
             <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
               <h3 className="font-medium text-slate-900">Рабочий Telegram-аккаунт</h3>
               <p className="mt-1 text-xs text-amber-800">
@@ -570,7 +794,7 @@ export function SalesPlaybookSetup({
                   <p className="text-xs text-slate-600">
                     {telegramAccount.delivery === "SMS"
                       ? `Код отправлен по SMS на ${telegramAccount.phoneMasked}.`
-                      : `Код обычно приходит не SMS, а в приложение Telegram: откройте чат «Telegram» / «Notification» на телефоне, где ${telegramAccount.phoneMasked} уже вошёл.`}
+                      : `Сейчас Telegram выбрал доставку в приложение, не SMS. Откройте на телефоне (${telegramAccount.phoneMasked}) чат «Telegram» / «Notification» и возьмите код оттуда. Кнопка ниже запрашивает повтор — часто уже как SMS.`}
                   </p>
                   {telegramAccount.lastError && <p className="text-xs text-rose-600">{telegramAccount.lastError}</p>}
                   <input className={fieldClass} inputMode="numeric" value={accountAuth.code} onChange={(event) => setAccountAuth({ ...accountAuth, code: event.target.value })} placeholder="Код из Telegram или SMS" />
@@ -664,14 +888,16 @@ export function SalesPlaybookSetup({
 
             <div className="rounded-2xl border border-violet-100 bg-violet-50/40 p-4">
               <h3 className="font-medium text-slate-900">Материалы навыка</h3>
-              <p className="mt-1 text-xs text-slate-500">DOCX, PDF или PPTX, до 15 МБ. Ответы будут основаны только на этих материалах.</p>
+              <p className="mt-1 text-xs text-slate-500">
+                DOCX/PDF/PPTX — база знаний (текст). Презентации, PDF и картинки агент может прислать клиенту файлом, если попросить в диалоге или указать имя / [[FILE:имя]].
+              </p>
               <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50">
                 <Upload size={16} />
-                Загрузить документ
+                Загрузить файл
                 <input
                   type="file"
                   className="sr-only"
-                  accept=".docx,.pdf,.pptx"
+                  accept=".docx,.pdf,.pptx,.png,.jpg,.jpeg,.webp,.gif,image/*"
                   disabled={busy}
                   onChange={(event) => {
                     const file = event.target.files?.[0];
@@ -686,15 +912,49 @@ export function SalesPlaybookSetup({
               {documents.map((document) => (
                 <article key={document.id} className="rounded-xl border border-slate-200 p-3">
                   <div className="flex items-start gap-3">
-                    <FileText className="mt-0.5 shrink-0 text-violet-600" size={18} />
-                    <button type="button" className="min-w-0 flex-1 text-left" onClick={() => void showPreview(document)}>
+                    {document.isImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={document.url}
+                        alt={document.fileName}
+                        className="h-12 w-12 shrink-0 rounded-lg object-cover"
+                      />
+                    ) : (
+                      <FileText className="mt-0.5 shrink-0 text-violet-600" size={18} />
+                    )}
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 text-left"
+                      onClick={() => {
+                        if (document.isImage) {
+                          setPreview({ fileName: document.fileName, text: `Картинка: ${document.url}` });
+                          return;
+                        }
+                        void showPreview(document);
+                      }}
+                    >
                       <p className="truncate text-sm font-medium text-slate-900">{document.fileName}</p>
                       <p className="mt-0.5 text-xs text-slate-500">
-                        {Math.max(1, Math.round(document.sizeBytes / 1024))} КБ · {document.textLength.toLocaleString("ru-RU")} символов
+                        {document.isImage ? (
+                          <span className="inline-flex items-center gap-1">
+                            <ImageIcon size={12} /> вложение · {Math.max(1, Math.round(document.sizeBytes / 1024))} КБ
+                          </span>
+                        ) : (
+                          <>
+                            обучение · {Math.max(1, Math.round(document.sizeBytes / 1024))} КБ ·{" "}
+                            {document.textLength.toLocaleString("ru-RU")} символов
+                            <span className="text-slate-400"> · можно приложить файлом, если указать имя в промпте</span>
+                          </>
+                        )}
                       </p>
                     </button>
-                    <a href={document.url} target="_blank" rel="noreferrer" aria-label="Открыть исходный файл" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-violet-700">
-                      <ExternalLink size={15} />
+                    <a
+                      href={fileDownloadUrl(document.url, document.fileName)}
+                      download={document.fileName}
+                      aria-label={`Скачать ${document.fileName}`}
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-violet-50 hover:text-violet-700"
+                    >
+                      <Download size={15} />
                     </a>
                     <button type="button" aria-label="Удалить документ" onClick={() => void remove(document)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600">
                       <Trash2 size={15} />
@@ -702,7 +962,7 @@ export function SalesPlaybookSetup({
                   </div>
                 </article>
               ))}
-              {!documents.length && <p className="rounded-xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">Документы ещё не загружены</p>}
+              {!documents.length && <p className="rounded-xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">Материалы ещё не загружены</p>}
             </div>
 
             {preview && (
@@ -711,7 +971,16 @@ export function SalesPlaybookSetup({
                   <h3 className="truncate text-sm font-medium text-slate-900">{preview.fileName}</h3>
                   <button type="button" aria-label="Закрыть предпросмотр" onClick={() => setPreview(null)}><X size={16} /></button>
                 </div>
-                <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words font-sans text-xs leading-5 text-slate-600">{preview.text}</pre>
+                {/\.(png|jpe?g|webp|gif)$/i.test(preview.fileName) || preview.text.startsWith("Картинка:") ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={documents.find((item) => item.fileName === preview.fileName)?.url ?? ""}
+                    alt={preview.fileName}
+                    className="mt-3 max-h-80 w-full rounded-xl object-contain"
+                  />
+                ) : (
+                  <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words font-sans text-xs leading-5 text-slate-600">{preview.text}</pre>
+                )}
               </div>
             )}
           </div>

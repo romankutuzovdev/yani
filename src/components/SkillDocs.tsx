@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Download } from "lucide-react";
+import { fileDownloadUrl } from "@/lib/downloadUrl";
 
 /** Same limit as server MAX_SKILL_DOCS. */
 const DEFAULT_MAX = 15;
@@ -197,14 +199,24 @@ export function SkillDocs({
             className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-violet-100 bg-white px-3 py-2 text-sm"
           >
             <p className="min-w-0 truncate font-medium text-slate-800">{doc.fileName}</p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void remove(doc)}
-              className="rounded-lg border border-rose-200 px-2.5 py-1 text-rose-600 disabled:opacity-60"
-            >
-              Убрать
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <a
+                href={fileDownloadUrl(doc.url, doc.fileName)}
+                download={doc.fileName}
+                className="inline-flex items-center gap-1 rounded-lg border border-violet-200 px-2.5 py-1 text-violet-700 hover:bg-violet-50"
+              >
+                <Download size={14} />
+                Скачать
+              </a>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void remove(doc)}
+                className="rounded-lg border border-rose-200 px-2.5 py-1 text-rose-600 disabled:opacity-60"
+              >
+                Убрать
+              </button>
+            </div>
           </div>
         ))}
       </div>

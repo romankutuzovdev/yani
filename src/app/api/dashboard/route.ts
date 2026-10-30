@@ -1,28 +1,24 @@
+import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { json, requireAdmin } from "@/lib/api";
 import { formatUsd } from "@/llm/pricing";
 import { placesForIps } from "@/lib/ipRegion";
+import { dayKey, dayLabel } from "@/lib/agentActivityStats";
+import {
+  buildSalesDashboard,
+  buildSupportDashboard,
+  type DashboardBucket,
+} from "@/lib/dashboardMetrics";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const VISIT_DAYS = 14;
-const TZ = "Europe/Minsk";
 
-function dayKey(date: Date) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
+function parseBucket(raw: string | null): DashboardBucket {
+  if (raw === "week" || raw === "month" || raw === "year") return raw;
+  return "day";
 }
 
-function dayLabel(key: string) {
-  const [year, month, day] = key.split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day, 12));
-  return new Intl.DateTimeFormat("ru-RU", { timeZone: TZ, day: "numeric", month: "short" }).format(date);
-}
-
-export async function GET() {
+export async function GET(req: NextRequest) {
   const admin = await requireAdmin();
   if (admin instanceof Response) return admin;
 
@@ -33,19 +29,21 @@ export async function GET() {
   startOfMonth.setHours(0, 0, 0, 0);
   const oldestKey = dayKey(new Date(Date.now() - (VISIT_DAYS - 1) * DAY_MS));
   const since = new Date(`${oldestKey}T00:00:00+03:00`);
+  const agentId = req.nextUrl.searchParams.get("agentId")?.trim() || null;
+  const bucket = parseBucket(req.nextUrl.searchParams.get("bucket"));
 
-  const [agents, tasks, skills, tools, todayUsage, monthUsage, visits] = await Promise.all([
+  const [agents, tasks, skills, tools, todayUsage, monthUsage, visits, sales, support] = await Promise.all([
     prisma.agent.count(),
     prisma.task.count(),
     prisma.skill.count(),
     prisma.toolRegistry.count(),
     prisma.usageRecord.aggregate({
-      where: { createdAt: { gte: startOfDay } },
+      where: { createdAt: { gte: startOfDay }, provider: { not: "yandex" } },
       _sum: { totalTokens: true, estimatedCost: true },
       _count: true,
     }),
     prisma.usageRecord.aggregate({
-      where: { createdAt: { gte: startOfMonth } },
+      where: { createdAt: { gte: startOfMonth }, provider: { not: "yandex" } },
       _sum: { totalTokens: true, estimatedCost: true },
       _count: true,
     }),
@@ -53,6 +51,8 @@ export async function GET() {
       where: { createdAt: { gte: since } },
       select: { ip: true, createdAt: true },
     }),
+    buildSalesDashboard({ bucket, agentId }),
+    buildSupportDashboard({ bucket, agentId }),
   ]);
 
   const byDay = new Map<string, { requests: number; ips: Set<string> }>();
@@ -100,6 +100,11 @@ export async function GET() {
       requests: bucket.requests,
       visitors: bucket.ips.size,
     })),
-    visitsByRegion: [...regions.values()].sort((a, b) => b.requests - a.requests || a.label.localeCompare(b.label, "ru")),
+    visitsByRegion: [...regions.values()].sort(
+      (a, b) => b.visitors - a.visitors || a.label.localeCompare(b.label, "ru"),
+    ),
+    sales,
+    support,
+    agents: sales.agents,
   });
 }

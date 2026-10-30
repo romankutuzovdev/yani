@@ -1,6 +1,21 @@
 /** Europe/Minsk is UTC+3 year-round. */
 const OFFSET_MS = 3 * 60 * 60 * 1000;
 
+const MONTHS = [
+  "январь",
+  "февраль",
+  "март",
+  "апрель",
+  "май",
+  "июнь",
+  "июль",
+  "август",
+  "сентябрь",
+  "октябрь",
+  "ноябрь",
+  "декабрь",
+];
+
 export function minskParts(date: Date) {
   const shifted = new Date(date.getTime() + OFFSET_MS);
   return {
@@ -26,6 +41,28 @@ export function minskDayKey(date: Date) {
   return `${year}-${pad(month)}-${pad(day)}`;
 }
 
+/** Parse YYYY-MM-DD as a Minsk calendar day → [start, end) UTC instants. */
+export function minskDayBounds(dayKey: string): { start: Date; end: Date } | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey.trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const start = new Date(Date.UTC(year, month - 1, day) - OFFSET_MS);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+export function minskDayLabel(dayKey: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey.trim());
+  if (!match) return dayKey;
+  const day = Number(match[3]);
+  const month = Number(match[2]);
+  const year = Number(match[1]);
+  return `${day} ${MONTHS[month - 1]} ${year}`;
+}
+
 export type UsageBucket = "day" | "week" | "month" | "quarter" | "year";
 
 const BUCKETS = new Set<UsageBucket>(["day", "week", "month", "quarter", "year"]);
@@ -43,21 +80,6 @@ function isoWeek(year: number, month: number, day: number) {
   const week = Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
   return { weekYear: date.getUTCFullYear(), week };
 }
-
-const MONTHS = [
-  "январь",
-  "февраль",
-  "март",
-  "апрель",
-  "май",
-  "июнь",
-  "июль",
-  "август",
-  "сентябрь",
-  "октябрь",
-  "ноябрь",
-  "декабрь",
-];
 
 /** Period key and label for a usage row, in Europe/Minsk. */
 export function usagePeriod(date: Date, bucket: UsageBucket) {

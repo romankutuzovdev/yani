@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { formatExact } from "@/lib/money";
 import { PagedRows } from "@/components/PagedRows";
+import { minskDayKey } from "@/lib/minskTime";
 
 type Range = "today" | "month" | "all";
 type Bucket = "day" | "week" | "month" | "quarter" | "year";
@@ -20,6 +21,10 @@ type Report = {
     outputTokens: number;
     totalTokens: number;
     range: string;
+    selectedDay?: string | null;
+    selectedDayLabel?: string | null;
+    selectedDayRequests?: number | null;
+    selectedDayCostLabel?: string | null;
   };
   byModel: Array<{
     model: string;
@@ -124,6 +129,7 @@ export default function AnalyticsPage() {
   const [range, setRange] = useState<Range>("month");
   const [bucket, setBucket] = useState<Bucket>("day");
   const [agentId, setAgentId] = useState("");
+  const [day, setDay] = useState("");
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -134,6 +140,7 @@ export default function AnalyticsPage() {
     setError("");
     const params = new URLSearchParams({ range, bucket });
     if (agentId) params.set("agentId", agentId);
+    if (day) params.set("day", day);
     void fetch(`/api/llm/usage?${params}`)
       .then(async (res) => {
         const data = await res.json();
@@ -149,13 +156,23 @@ export default function AnalyticsPage() {
     return () => {
       cancelled = true;
     };
-  }, [range, bucket, agentId]);
+  }, [range, bucket, agentId, day]);
 
   const totals = report?.totals;
-  const spent =
-    range === "today" ? totals?.todayLabel : range === "month" ? totals?.monthLabel : totals?.allLabel;
-  const requests =
-    range === "today" ? totals?.todayRequests : range === "month" ? totals?.monthRequests : totals?.requests;
+  const spent = day
+    ? totals?.selectedDayCostLabel
+    : range === "today"
+      ? totals?.todayLabel
+      : range === "month"
+        ? totals?.monthLabel
+        : totals?.allLabel;
+  const requests = day
+    ? totals?.selectedDayRequests
+    : range === "today"
+      ? totals?.todayRequests
+      : range === "month"
+        ? totals?.monthRequests
+        : totals?.requests;
   const maxDay = Math.max(1, ...(report?.daily ?? []).map((day) => day.totalTokens));
   const tokenBase = totals?.totalTokens || 1;
 
@@ -170,14 +187,52 @@ export default function AnalyticsPage() {
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <label className="text-sm text-slate-600">
+            День
+            <input
+              type="date"
+              value={day}
+              max={minskDayKey(new Date())}
+              onChange={(e) => setDay(e.target.value)}
+              className="ml-2 rounded-xl border border-violet-200 bg-white px-3 py-1.5 text-sm text-slate-700"
+            />
+          </label>
+          <button
+            type="button"
+            className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-sm text-violet-700 hover:bg-violet-50"
+            onClick={() => setDay(minskDayKey(new Date(Date.now() - 24 * 60 * 60 * 1000)))}
+          >
+            Вчера
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-sm text-violet-700 hover:bg-violet-50"
+            onClick={() => setDay(minskDayKey(new Date()))}
+          >
+            Сегодня
+          </button>
+          {day ? (
+            <button
+              type="button"
+              className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-50"
+              onClick={() => setDay("")}
+            >
+              Сбросить день
+            </button>
+          ) : null}
+        </div>
         <div className="flex rounded-xl border border-violet-200 bg-white p-1">
           {RANGES.map((item) => (
             <button
               key={item.id}
               type="button"
-              onClick={() => setRange(item.id)}
+              onClick={() => {
+                setDay("");
+                setRange(item.id);
+              }}
               className={
-                range === item.id
+                !day && range === item.id
                   ? "rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white"
                   : "rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-violet-50"
               }

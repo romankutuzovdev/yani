@@ -18,6 +18,9 @@ const updateSchema = z.object({
   qualificationQuestions: z.string().trim().max(8000).optional(),
   status: z.enum(["RUNNING", "STOPPED"]).optional(),
   sendMode: z.enum(["DRAFT_ONLY", "APPROVAL_REQUIRED", "AUTO"]).optional(),
+  channelTelegramEnabled: z.boolean().optional(),
+  channelEmailEnabled: z.boolean().optional(),
+  telegramSendIntervalSeconds: z.number().int().min(10).max(86_400).optional(),
 });
 
 export async function GET(req: NextRequest, { params }: Params) {
@@ -46,8 +49,35 @@ export async function PUT(req: NextRequest, { params }: Params) {
         qualificationQuestions: body.qualificationQuestions,
         status: body.status,
         sendMode: body.sendMode,
+        channelTelegramEnabled: body.channelTelegramEnabled,
+        channelEmailEnabled: body.channelEmailEnabled,
+        telegramSendIntervalSeconds: body.telegramSendIntervalSeconds,
       },
     });
+    if (body.sendMode === "AUTO") {
+      const now = new Date();
+      await prisma.crmOutboxMessage.updateMany({
+        where: {
+          status: { in: ["DRAFT", "APPROVED"] },
+          connection: { playbookId: id },
+        },
+        data: {
+          status: "APPROVED",
+          approvedAt: now,
+          nextAttemptAt: now,
+          attempts: 0,
+          error: "",
+        },
+      });
+      await prisma.crmMessage.updateMany({
+        where: {
+          direction: "OUTBOUND",
+          status: { in: ["DRAFT", "APPROVED"] },
+          conversation: { lead: { playbookId: id } },
+        },
+        data: { status: "APPROVED" },
+      });
+    }
     await writeLog({
       type: "crm_playbook",
       message:
@@ -69,14 +99,21 @@ export async function PUT(req: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const { id } = await params;
-  const playbook = await crmPlaybookForAgent(id, req.nextUrl.searchParams.get("agentId"));
-  if (playbook instanceof Response) return playbook;
-  await prisma.salesPlaybook.delete({ where: { id } });
-  await writeLog({
-    type: "crm_playbook",
-    message: `Удалён навык продажи «${playbook.name}»`,
-    agentId: playbook.agentId,
-  });
-  return json({ ok: true });
+  try {
+    const { id } = await params;
+    const playbook = await crmPlaybookForAgent(id, req.nextUrl.searchParams.get("agentId"));
+    if (playbook instanceof Response) return playbook;
+    await prisma.salesPlaybook.delete({ where: { id } });
+    await writeLog({
+      type: "crm_playbook",
+      message: `Удалён навык продажи «${playbook.name}»`,
+      agentId: playbook.agentId,
+    });
+    return json({ ok: true });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError) {
+      return error("Не удалось удалить навык: есть связанные данные", 409);
+    }
+    return error("Не удалось удалить навык продажи", 500);
+  }
 }

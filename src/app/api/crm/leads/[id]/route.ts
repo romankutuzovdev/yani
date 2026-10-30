@@ -18,6 +18,8 @@ const updateSchema = z.object({
   notes: z.string().trim().max(10_000).optional(),
   agentInstruction: z.string().trim().max(10_000).optional(),
   agentPaused: z.boolean().optional(),
+  /** Clear urgent flag after manager handled the client. */
+  clearUrgent: z.boolean().optional(),
 });
 
 export async function GET(req: NextRequest, { params }: Params) {
@@ -27,23 +29,88 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const lead = await prisma.salesLead.findUnique({
     where: { id },
-    include: {
-      playbook: true,
-      identities: true,
+    select: {
+      id: true,
+      playbookId: true,
+      displayName: true,
+      company: true,
+      email: true,
+      phone: true,
+      telegram: true,
+      stage: true,
+      notes: true,
+      agentInstruction: true,
+      agentPaused: true,
+      urgentAt: true,
+      urgentNote: true,
+      lastContactAt: true,
+      updatedAt: true,
+      createdAt: true,
+      replyCount: true,
+      replySpendUsd: true,
+      playbook: {
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          sendMode: true,
+          channelTelegramEnabled: true,
+          channelEmailEnabled: true,
+          replyCount: true,
+          replySpendUsd: true,
+        },
+      },
+      identities: {
+        select: { id: true, type: true, value: true, originalValue: true },
+      },
       conversations: {
         orderBy: { createdAt: "asc" },
-        include: {
+        select: {
+          id: true,
+          channel: true,
+          lastMessageAt: true,
           messages: {
-            orderBy: { createdAt: "asc" },
-            take: 300,
-            include: { outbox: true },
+            // Latest first, then reverse for chronological UI (avoids oldest-200 trap).
+            orderBy: { createdAt: "desc" },
+            take: 80,
+            select: {
+              id: true,
+              direction: true,
+              status: true,
+              body: true,
+              attachments: true,
+              createdAt: true,
+              outbox: {
+                select: { status: true, attempts: true, error: true, nextAttemptAt: true },
+              },
+            },
           },
         },
       },
-      fieldChanges: { orderBy: { createdAt: "desc" }, take: 20 },
+      fieldChanges: {
+        orderBy: { createdAt: "desc" },
+        take: 12,
+        select: {
+          id: true,
+          field: true,
+          oldValue: true,
+          newValue: true,
+          confidence: true,
+          createdAt: true,
+        },
+      },
     },
   });
-  return json({ lead });
+  if (!lead) return json({ lead: null });
+  return json({
+    lead: {
+      ...lead,
+      conversations: lead.conversations.map((conversation) => ({
+        ...conversation,
+        messages: [...conversation.messages].reverse(),
+      })),
+    },
+  });
 }
 
 export async function PUT(req: NextRequest, { params }: Params) {
@@ -92,8 +159,23 @@ export async function PUT(req: NextRequest, { params }: Params) {
           notes: body.notes,
           agentInstruction: body.agentInstruction,
           agentPaused: body.agentPaused,
+          ...(body.clearUrgent
+            ? { urgentAt: null, urgentNote: "" }
+            : {}),
         },
       });
+      if (body.stage != null && body.stage !== allowed.stage) {
+        await tx.leadFieldChange.create({
+          data: {
+            leadId: id,
+            field: "stage",
+            oldValue: allowed.stage,
+            newValue: body.stage,
+            source: "MANUAL",
+            confidence: 1,
+          },
+        });
+      }
       await tx.leadIdentity.deleteMany({ where: { leadId: id } });
       if (identities.length) {
         await tx.leadIdentity.createMany({

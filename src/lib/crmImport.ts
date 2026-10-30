@@ -115,6 +115,31 @@ export function parseCsvText(text: string): string[][] {
   return rows.filter((item) => item.some((value) => value.trim()));
 }
 
+function looksLikeEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function looksLikePhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits.length >= 7;
+}
+
+/** If the sheet has no header row, guess columns from the first data cells. */
+function inferMapping(sample: string[]): Array<(typeof CRM_IMPORT_HEADERS)[number] | null> {
+  return sample.map((value, index) => {
+    const text = cell(value);
+    if (!text) return null;
+    if (looksLikeEmail(text)) return "email";
+    if (text.startsWith("@") || /^t\.me\//i.test(text) || /^[A-Za-z0-9_]{4,32}$/.test(text)) {
+      return "telegram";
+    }
+    if (looksLikePhone(text)) return "phone";
+    if (index === 0) return "displayName";
+    if (index === 1) return "company";
+    return "notes";
+  });
+}
+
 export function parseImportFile(buffer: Buffer, fileName: string): CrmImportRow[] {
   const lower = fileName.toLowerCase();
   let matrix: string[][];
@@ -135,15 +160,22 @@ export function parseImportFile(buffer: Buffer, fileName: string): CrmImportRow[
 
   if (!matrix.length) return [];
   const headerRow = matrix[0] ?? [];
-  const mapping = headerRow.map((header) => mapHeader(header));
+  let mapping = headerRow.map((header) => mapHeader(header));
+  let dataStart = 1;
+
+  // Headerless sheet: first row is already a contact (e.g. a single email cell).
+  if (!mapping.some(Boolean)) {
+    mapping = inferMapping(headerRow);
+    dataStart = 0;
+  }
   if (!mapping.some(Boolean)) {
     throw new Error(
-      "Не найдены колонки. Нужны: displayName, company, email, phone, telegram, notes",
+      "Не найдены колонки. Добавьте заголовок: email (или displayName, company, phone, telegram, notes)",
     );
   }
 
   const rows: CrmImportRow[] = [];
-  for (let i = 1; i < matrix.length; i += 1) {
+  for (let i = dataStart; i < matrix.length; i += 1) {
     const line = matrix[i] ?? [];
     const mapped: Record<string, string> = {
       displayName: "",
@@ -157,6 +189,16 @@ export function parseImportFile(buffer: Buffer, fileName: string): CrmImportRow[
       if (!key) return;
       mapped[key] = cell(line[index]);
     });
+    if (
+      !mapped.displayName &&
+      !mapped.company &&
+      !mapped.email &&
+      !mapped.phone &&
+      !mapped.telegram &&
+      !mapped.notes
+    ) {
+      continue;
+    }
     rows.push({
       rowNumber: i + 1,
       displayName: mapped.displayName,

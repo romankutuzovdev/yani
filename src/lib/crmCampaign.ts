@@ -3,11 +3,13 @@ import {
   messageStatusForSendMode,
   outboxStatusForSendMode,
 } from "@/lib/crmAutomation";
+import { generateFirstTouchEmail } from "@/lib/crmGrounding";
 import {
   isQuietHour,
   localDayKey,
   renderCampaignTemplate,
 } from "@/lib/crmImport";
+import { syncRunningCampaignsFromLists } from "@/lib/crmContactLists";
 
 function parseJson<T>(raw: string, fallback: T): T {
   try {
@@ -17,14 +19,60 @@ function parseJson<T>(raw: string, fallback: T): T {
   }
 }
 
+type CampaignChannel = "EMAIL" | "TELEGRAM";
+
+async function findCampaignConnection(playbookId: string, channel: CampaignChannel) {
+  if (channel === "EMAIL") {
+    return prisma.crmChannelConnection.findUnique({
+      where: { playbookId_type: { playbookId, type: "EMAIL" } },
+      include: {
+        playbook: {
+          include: {
+            documents: { where: { status: "READY" }, orderBy: { sortOrder: "asc" } },
+            agent: { select: { model: true } },
+          },
+        },
+      },
+    });
+  }
+  const connections = await prisma.crmChannelConnection.findMany({
+    where: {
+      playbookId,
+      type: { in: ["TELEGRAM_ACCOUNT", "TELEGRAM"] },
+      status: "CONNECTED",
+    },
+    include: {
+      playbook: {
+        include: {
+          documents: { where: { status: "READY" }, orderBy: { sortOrder: "asc" } },
+          agent: { select: { model: true } },
+        },
+      },
+    },
+  });
+  return (
+    connections.find((item) => item.type === "TELEGRAM_ACCOUNT") ??
+    connections.find((item) => item.type === "TELEGRAM") ??
+    null
+  );
+}
+
+function telegramThreadForLead(lead: { telegram: string }) {
+  return lead.telegram.trim().replace(/^@/, "");
+}
+
 export async function processCampaignQueue(now = new Date()) {
+  // New contacts added to linked lists while the campaign runs join the queue.
+  await syncRunningCampaignsFromLists(now).catch(() => undefined);
+
   const campaigns = await prisma.crmCampaign.findMany({
-    where: { status: "RUNNING", channel: "EMAIL" },
+    where: { status: "RUNNING", channel: { in: ["EMAIL", "TELEGRAM"] } },
     orderBy: { updatedAt: "asc" },
     take: 20,
   });
 
   for (const campaign of campaigns) {
+    const channel = (campaign.channel === "TELEGRAM" ? "TELEGRAM" : "EMAIL") as CampaignChannel;
     if (isQuietHour(now, campaign.timezone, campaign.quietHoursStart, campaign.quietHoursEnd)) {
       continue;
     }
@@ -40,14 +88,15 @@ export async function processCampaignQueue(now = new Date()) {
     }
     if (sentToday >= campaign.dailyLimit) continue;
 
-    const connection = await prisma.crmChannelConnection.findUnique({
-      where: {
-        playbookId_type: { playbookId: campaign.playbookId, type: "EMAIL" },
-      },
-      include: { playbook: { select: { sendMode: true, status: true } } },
-    });
+    const connection = await findCampaignConnection(campaign.playbookId, channel);
     if (!connection || connection.status !== "CONNECTED") continue;
+    if (channel === "TELEGRAM" && connection.type !== "TELEGRAM_ACCOUNT") {
+      // Bot API cannot cold-message; only a linked personal account can.
+      continue;
+    }
     if (connection.playbook.status !== "RUNNING") continue;
+    if (channel === "EMAIL" && connection.playbook.channelEmailEnabled === false) continue;
+    if (channel === "TELEGRAM" && connection.playbook.channelTelegramEnabled === false) continue;
 
     const item = await prisma.crmCampaignItem.findFirst({
       where: {
@@ -77,10 +126,19 @@ export async function processCampaignQueue(now = new Date()) {
     });
     if (!claimed.count) continue;
 
-    if (!item.lead.email.trim()) {
+    const email = item.lead.email.trim();
+    const telegramThread = telegramThreadForLead(item.lead);
+    if (channel === "EMAIL" && !email) {
       await prisma.crmCampaignItem.update({
         where: { id: item.id },
         data: { status: "SKIPPED", error: "Нет email", processedAt: now },
+      });
+      continue;
+    }
+    if (channel === "TELEGRAM" && !telegramThread) {
+      await prisma.crmCampaignItem.update({
+        where: { id: item.id },
+        data: { status: "SKIPPED", error: "Нет Telegram username", processedAt: now },
       });
       continue;
     }
@@ -98,46 +156,82 @@ export async function processCampaignQueue(now = new Date()) {
     }
 
     try {
-      const body = renderCampaignTemplate(campaign.bodyTemplate, item.lead);
-      const subject = renderCampaignTemplate(campaign.subject, item.lead);
+      const subject =
+        channel === "EMAIL" ? renderCampaignTemplate(campaign.subject, item.lead) : "";
+      let body = "";
+      let attachmentsJson = "[]";
+      if (campaign.bodyMode === "PROMPT") {
+        const generated = await generateFirstTouchEmail({
+          prompt: campaign.bodyTemplate,
+          playbook: connection.playbook,
+          lead: item.lead,
+          documents: connection.playbook.documents,
+          model: connection.playbook.agent.model,
+        });
+        body = generated.body;
+        // Cold Telegram outreach with files triggers PEER_FLOOD; keep attachments for email only.
+        attachmentsJson =
+          channel === "EMAIL" ? JSON.stringify(generated.attachments) : "[]";
+      } else {
+        body = renderCampaignTemplate(campaign.bodyTemplate, item.lead);
+      }
+      if (!body.trim()) {
+        await prisma.crmCampaignItem.update({
+          where: { id: item.id },
+          data: {
+            status: "FAILED",
+            error: channel === "EMAIL" ? "Пустой текст письма" : "Пустой текст сообщения",
+            processedAt: now,
+          },
+        });
+        continue;
+      }
       const outboxStatus = outboxStatusForSendMode(connection.playbook.sendMode);
       const messageStatus = messageStatusForSendMode(connection.playbook.sendMode);
+      const threadId = channel === "EMAIL" ? email : telegramThread;
 
       await prisma.$transaction(async (tx) => {
+        const existing = await tx.crmConversation.findUnique({
+          where: { leadId_channel: { leadId: item.leadId, channel } },
+          select: { id: true, externalThreadId: true, externalContext: true },
+        });
         const conversation = await tx.crmConversation.upsert({
-          where: {
-            leadId_channel: { leadId: item.leadId, channel: "EMAIL" },
-          },
+          where: { leadId_channel: { leadId: item.leadId, channel } },
           create: {
             leadId: item.leadId,
-            channel: "EMAIL",
-            externalThreadId: item.lead.email,
+            channel,
+            externalThreadId: threadId,
             externalContext: JSON.stringify({
-              subject,
+              ...(channel === "EMAIL" ? { subject } : {}),
               firstContact: true,
               campaignId: campaign.id,
             }),
             lastMessageAt: now,
           },
           update: {
-            externalThreadId: item.lead.email,
+            externalThreadId: existing?.externalThreadId || threadId,
             lastMessageAt: now,
           },
         });
 
-        const context = parseJson<Record<string, unknown>>(conversation.externalContext, {});
-        if (!context.subject || context.firstContact) {
-          await tx.crmConversation.update({
-            where: { id: conversation.id },
-            data: {
-              externalContext: JSON.stringify({
-                ...context,
-                subject,
-                firstContact: true,
-                campaignId: campaign.id,
-              }),
-            },
-          });
+        if (channel === "EMAIL") {
+          const context = parseJson<Record<string, unknown>>(
+            existing?.externalContext ?? conversation.externalContext,
+            {},
+          );
+          if (!context.subject || context.firstContact) {
+            await tx.crmConversation.update({
+              where: { id: conversation.id },
+              data: {
+                externalContext: JSON.stringify({
+                  ...context,
+                  subject,
+                  firstContact: true,
+                  campaignId: campaign.id,
+                }),
+              },
+            });
+          }
         }
 
         const message = await tx.crmMessage.create({
@@ -146,6 +240,7 @@ export async function processCampaignQueue(now = new Date()) {
             direction: "OUTBOUND",
             status: messageStatus,
             body,
+            attachments: attachmentsJson,
           },
         });
         const outbox = await tx.crmOutboxMessage.create({

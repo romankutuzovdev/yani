@@ -62,7 +62,7 @@ export async function saveUploadedDocument(
   file: File,
   folder: "documents" | "misc" = "documents",
 ) {
-  const max = Number(process.env.MAX_UPLOAD_DOC_BYTES ?? 15_728_640); // 15MB
+  const max = Number(process.env.MAX_UPLOAD_DOC_BYTES ?? 83_886_080); // 80MB
   const name = file.name || "document.docx";
   const lower = name.toLowerCase();
   const mime = file.type || "";
@@ -103,7 +103,7 @@ export async function saveUploadedDocument(
 
 /** Text files shown from the public chat menu. */
 export async function saveUploadedTextFile(file: File) {
-  const max = Number(process.env.MAX_UPLOAD_DOC_BYTES ?? 15_728_640);
+  const max = Number(process.env.MAX_UPLOAD_DOC_BYTES ?? 83_886_080); // 80MB
   const name = (file.name || "text.txt").split(/[/\\]/).pop() || "text.txt";
   const lower = name.toLowerCase();
   const mime = file.type || "";

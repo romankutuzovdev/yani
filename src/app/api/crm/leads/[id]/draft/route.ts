@@ -36,9 +36,6 @@ export async function POST(req: Request, { params }: Params) {
       },
     });
     if (!lead) return error("Карточка не найдена", 404);
-    if (!lead.playbook.documents.length) {
-      return error("Сначала загрузите документы в навык продажи");
-    }
 
     const result = await generateGroundedSalesDraft({
       kind: body.kind,

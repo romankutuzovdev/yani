@@ -26,8 +26,20 @@ const MIME: Record<string, string> = {
   ".txt": "text/plain; charset=utf-8",
   ".md": "text/plain; charset=utf-8",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".pdf": "application/pdf",
 };
+
+function contentDisposition(kind: "inline" | "attachment", fileName: string) {
+  const safe = fileName.replace(/[\r\n"]/g, "_").trim() || "file";
+  const ascii = safe.replace(/[^\x20-\x7E]/g, "_") || "file";
+  const encoded = encodeURIComponent(safe).replace(
+    /[!'()*]/g,
+    (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `${kind}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
 
 function safeParts(parts: string[]) {
   const safe = parts.map((p) => p.replace(/[^a-zA-Z0-9._-]/g, "")).filter(Boolean);
@@ -52,10 +64,18 @@ export async function GET(req: NextRequest, { params }: Params) {
   const contentType = MIME[ext] ?? "application/octet-stream";
   const name = safe[safe.length - 1] ?? "";
   const seoIcon = safe[0] === "site" && name.startsWith("favicon");
-  const headers = {
+  const forceDownload =
+    req.nextUrl.searchParams.get("download") === "1" ||
+    req.nextUrl.searchParams.get("download") === "true";
+  const downloadName =
+    req.nextUrl.searchParams.get("name")?.trim() ||
+    name ||
+    `file${ext || ""}`;
+  const headers: Record<string, string> = {
     "Content-Type": contentType,
     "Accept-Ranges": "bytes",
     "Cache-Control": seoIcon ? "public, max-age=300, must-revalidate" : "public, max-age=86400",
+    "Content-Disposition": contentDisposition(forceDownload ? "attachment" : "inline", downloadName),
   };
 
   const range = req.headers.get("range");

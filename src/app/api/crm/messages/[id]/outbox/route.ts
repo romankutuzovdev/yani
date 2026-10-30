@@ -60,6 +60,8 @@ export async function PUT(req: Request, { params }: Params) {
           approvedAt: input.action === "APPROVE" ? new Date() : null,
           nextAttemptAt: new Date(),
           error: "",
+          // Confirm / retry must re-enter the worker queue even after flood failures.
+          ...(input.action === "APPROVE" ? { attempts: 0 } : {}),
         },
       });
     });

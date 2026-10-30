@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "CrmCampaign" ADD COLUMN "bodyMode" TEXT NOT NULL DEFAULT 'TEMPLATE';

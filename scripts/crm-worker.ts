@@ -11,6 +11,7 @@ import {
   type CrmJobName,
 } from "@/lib/crmQueue";
 import { runCrmRecovery } from "@/lib/crmRecovery";
+import { deliverInstagramOutbox, resumeInstagramInbound } from "@/lib/crmInstagram";
 
 let stopping = false;
 
@@ -26,6 +27,8 @@ async function tick(name: CrmJobName | "poll") {
     }
   }
   await processCampaignQueue();
+  await resumeInstagramInbound();
+  await deliverInstagramOutbox();
 }
 
 async function main() {
@@ -45,6 +48,13 @@ async function main() {
   while (!stopping) {
     if (!worker) {
       await tick("poll");
+    } else {
+      await resumeInstagramInbound().catch((cause) => {
+        console.error("[crm-worker] instagram inbound:", cause instanceof Error ? cause.message : cause);
+      });
+      await deliverInstagramOutbox().catch((cause) => {
+        console.error("[crm-worker] instagram:", cause instanceof Error ? cause.message : cause);
+      });
     }
     await pause(Number(process.env.CRM_WORKER_POLL_MS ?? 10_000));
   }

@@ -32,15 +32,21 @@ export function AdminShell({
   userName,
   area = "admin",
   chatHref = "/chat",
+  salesEnabled = true,
 }: {
   children: React.ReactNode;
   userName: string;
   area?: "admin" | "org";
   chatHref?: string;
+  /** Organization: hide CRM until admin enables sales on access. */
+  salesEnabled?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const nav = area === "org" ? ORG_NAV : ADMIN_NAV;
+  const nav =
+    area === "org"
+      ? ORG_NAV.filter((item) => item.href !== "/org/crm" || salesEnabled)
+      : ADMIN_NAV;
   const home = area === "org" ? "/org" : "/admin";
 
   async function logout() {

@@ -84,6 +84,14 @@ model User {
   /** Tariff the admin typed for this organization. Empty name means no tariff. */
   planName         String @default("")
   planMonthlyPrice Float  @default(0)
+  /** CRM / sales cabinet for this organization agent. */
+  salesEnabled           Boolean @default(false)
+  salesPlanName          String  @default("")
+  salesPlanMonthlyPrice  Float   @default(0)
+  /** Max sales playbooks (менеджеры/навыки продаж). 0 = без лимита, если salesEnabled. */
+  salesPlaybookLimit     Int     @default(0)
+  /** Contract limit: how many agents may use sales CRM under this org. */
+  salesAgentLimit        Int     @default(1)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   agents       Agent[]
@@ -127,6 +135,8 @@ model Agent {
   status         AgentStatus   @default(IDLE)
   statusMessage  String        @default("")
   enabled        Boolean       @default(true)
+  /** Chat and sales replies may search Yandex and open public pages. */
+  webSearchEnabled Boolean     @default(false)
   /** Opens yani.by and /chat when the URL has no slug. Only one agent at a time. */
   isPrimary      Boolean       @default(false)
   ownerId        String
@@ -424,6 +434,11 @@ model SalesPlaybook {
   qualificationQuestions String @default("")
   status             String   @default("STOPPED")
   sendMode           String   @default("APPROVAL_REQUIRED")
+  /** Which channels are used for client communication (can be both). */
+  channelTelegramEnabled Boolean @default(true)
+  channelEmailEnabled    Boolean @default(true)
+  /** Min seconds between outbound Telegram sends for this playbook. */
+  telegramSendIntervalSeconds Int @default(300)
   replyCount         Int      @default(0)
   replySpendUsd      Float    @default(0)
   createdAt          DateTime @default(now())
@@ -436,11 +451,48 @@ model SalesPlaybook {
   identities LeadIdentity[]
   importJobs CrmImportJob[]
   campaigns  CrmCampaign[]
+  contactLists CrmContactList[]
   auditEvents CrmAuditEvent[]
   deadLetters CrmDeadLetter[]
 
   @@unique([agentId, name])
   @@index([agentId, status])
+}
+
+/** Named outbound contact list (EMAIL or TELEGRAM) for first-touch campaigns. */
+model CrmContactList {
+  id         String   @id @default(cuid())
+  playbookId String
+  name       String
+  /** EMAIL | TELEGRAM */
+  channel    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  playbook SalesPlaybook       @relation(fields: [playbookId], references: [id], onDelete: Cascade)
+  contacts CrmContactListItem[]
+
+  @@index([playbookId, channel, updatedAt])
+  @@unique([playbookId, name, channel])
+}
+
+model CrmContactListItem {
+  id          String   @id @default(cuid())
+  listId      String
+  displayName String   @default("")
+  company     String   @default("")
+  email       String   @default("")
+  phone       String   @default("")
+  telegram    String   @default("")
+  notes       String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  list CrmContactList @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@index([listId, updatedAt])
+  @@index([listId, email])
+  @@index([listId, telegram])
 }
 
 /** Source material used to ground CRM replies and proposals. */
@@ -475,6 +527,9 @@ model SalesLead {
   notes            String   @default("")
   agentInstruction String   @default("")
   agentPaused      Boolean  @default(false)
+  /** When set, manager should call/write the client ASAP. */
+  urgentAt         DateTime?
+  urgentNote       String   @default("")
   replyCount       Int      @default(0)
   replySpendUsd    Float    @default(0)
   lastContactAt    DateTime?
@@ -559,6 +614,7 @@ model CrmMessage {
   outbox       CrmOutboxMessage?
 
   @@index([conversationId, createdAt])
+  @@index([direction, status])
 }
 
 /** Encrypted external channel credentials and polling state for one playbook. */
@@ -653,6 +709,8 @@ model CrmCampaign {
   channel          String   @default("EMAIL")
   status           String   @default("DRAFT")
   subject          String   @default("")
+  /** TEMPLATE = готовый текст с {{placeholders}}; PROMPT = инструкция, текст пишет агент. */
+  bodyMode         String   @default("TEMPLATE")
   bodyTemplate     String   @default("")
   dailyLimit       Int      @default(40)
   intervalSeconds  Int      @default(90)
@@ -662,6 +720,8 @@ model CrmCampaign {
   sentToday        Int      @default(0)
   sentTodayDate    String   @default("")
   importJobId      String   @default("")
+  /** JSON string[] of CrmContactList ids — new contacts sync into a running campaign. */
+  contactListIds   String   @default("[]")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   startedAt        DateTime?

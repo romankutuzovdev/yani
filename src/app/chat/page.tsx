@@ -194,6 +194,16 @@ export default function ClientChatPage() {
   const limitLocked = messages.some((m) => m.limit === "month" || m.limit === "day");
   const greeting = agent?.greeting || "Чем я могу помочь?";
 
+  /** Live activity line while waiting (SSE statusMessage), ChatGPT-style. */
+  const activityLine = useMemo(() => {
+    if (!busy) return null;
+    const raw = agent?.statusMessage?.trim() || "";
+    if (/ищет в интернете|читает страницу|запрашивает данные/i.test(raw)) return raw;
+    if (agent?.status === "WORKING" && raw) return raw;
+    if (agent?.status === "THINKING" && raw) return raw;
+    return "Думаю";
+  }, [busy, agent?.status, agent?.statusMessage]);
+
   useEffect(() => {
     const sizer = inputSizerRef.current;
     if (!sizer) return;
@@ -584,8 +594,16 @@ export default function ClientChatPage() {
                     )}
                   >
                     {waiting ? (
-                      <div className="break-words text-slate-600">
-                        <ThinkingDots />
+                      <div className="break-words text-slate-600" aria-live="polite">
+                        <div className="flex items-start gap-2.5">
+                          <span
+                            className="mt-1 inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-yani-deep"
+                            aria-hidden
+                          />
+                          <div className="min-w-0 flex-1">
+                            <ThinkingDots word={activityLine ?? "Думаю"} />
+                          </div>
+                        </div>
                       </div>
                     ) : parsed.text ? (
                       <div className="break-words">

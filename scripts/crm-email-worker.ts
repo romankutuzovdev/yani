@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { Prisma } from "@prisma/client";
 import { simpleParser, type Attachment } from "mailparser";
@@ -18,9 +18,12 @@ import { generateGroundedSalesDraft } from "@/lib/crmGrounding";
 import { normalizeEmail } from "@/lib/crm";
 import {
   applyInboundAutomation,
+  nextOutboundMorning,
   messageStatusForSendMode,
   outboxStatusForSendMode,
 } from "@/lib/crmAutomation";
+import { detectUrgentNeed, flagLeadUrgent } from "@/lib/crmDialogExtras";
+import { crmUploadAbsolutePath, outboundAttachmentName, type CrmAttachment } from "@/lib/crmMedia";
 
 let stopping = false;
 process.on("SIGINT", () => { stopping = true; });
@@ -42,7 +45,7 @@ async function saveAttachments(attachments: Attachment[]) {
   await mkdir(dir, { recursive: true });
   const saved = [];
   for (const attachment of attachments.slice(0, 10)) {
-    if (attachment.size > 15_728_640) continue;
+    if (attachment.size > 83_886_080) continue; // 80MB
     const original = (attachment.filename || "attachment").split(/[/\\]/).pop() || "attachment";
     const extension = path.extname(original).slice(0, 12);
     const fileName = `${Date.now()}-${randomBytes(6).toString("hex")}${extension}`;
@@ -109,7 +112,22 @@ async function prepareReply(connectionId: string, leadId: string, inboundText: s
       },
     },
   });
-  if (!lead || lead.agentPaused || lead.playbook.status !== "RUNNING" || !lead.playbook.documents.length) return;
+  if (!lead || lead.agentPaused || lead.playbook.status !== "RUNNING") return;
+  if (lead.playbook.channelEmailEnabled === false) {
+    console.log(`[crm-email] skip reply lead=${leadId}: channelEmailEnabled=false`);
+    return;
+  }
+  const urgent = detectUrgentNeed(inboundText);
+  if (urgent && !lead.urgentAt) {
+    await flagLeadUrgent({
+      playbookId: lead.playbookId,
+      agentId: lead.playbook.agentId,
+      leadId: lead.id,
+      reason: urgent,
+      snippet: inboundText,
+    });
+    console.log(`[crm-email] urgent lead=${leadId}: ${urgent}`);
+  }
   const result = await generateGroundedSalesDraft({
     kind: "ANSWER",
     prompt: inboundText,
@@ -130,6 +148,7 @@ async function prepareReply(connectionId: string, leadId: string, inboundText: s
         direction: "OUTBOUND",
         status: messageStatusForSendMode(lead.playbook.sendMode),
         body: result.draft,
+        attachments: JSON.stringify(result.attachments ?? []),
       },
     });
     await tx.crmOutboxMessage.create({
@@ -228,7 +247,10 @@ async function processIncoming(
         data: { status: "PROCESSED", processedAt: now },
       }),
     ]);
-    await applyInboundAutomation(lead.id, body);
+    const auto = await applyInboundAutomation(lead.id, body);
+    if (auto.changes.length) {
+      console.log(`[crm-email] card updated lead=${lead.id} ${auto.changes.join(", ")}`);
+    }
     await prepareReply(connection.id, lead.id, body);
   } catch (cause) {
     await prisma.crmInboundEvent.update({
@@ -296,6 +318,7 @@ async function deliverApproved() {
     include: {
       connection: true,
       conversation: true,
+      message: { select: { attachments: true } },
     },
   });
 
@@ -319,6 +342,18 @@ async function deliverApproved() {
       const references = Array.isArray(context.references)
         ? context.references.filter((item): item is string => typeof item === "string")
         : [];
+      const media = parseJson<CrmAttachment[]>(row.message.attachments || "[]", []);
+      const mailAttachments = [];
+      for (const item of media.slice(0, 5)) {
+        const fullPath = crmUploadAbsolutePath(item.url);
+        if (!fullPath) continue;
+        mailAttachments.push({
+          filename: outboundAttachmentName(item.name, fullPath),
+          content: await readFile(fullPath),
+          contentType: item.mimeType,
+          contentDisposition: "attachment" as const,
+        });
+      }
       const transport = createSmtpTransport(config, secret);
       const sent = await transport.sendMail({
         from: { name: config.fromName || config.email, address: config.email },
@@ -326,6 +361,7 @@ async function deliverApproved() {
         subject,
         text: `${row.body}${config.signature ? `\n\n—\n${config.signature}` : ""}`,
         html: htmlEmail(row.body, config.signature),
+        attachments: mailAttachments,
         inReplyTo: messageId,
         references: [...references, ...(messageId ? [messageId] : [])],
       });
@@ -347,21 +383,28 @@ async function deliverApproved() {
         }),
       ]);
     } catch (cause) {
-      const attempts = row.attempts + 1;
-      const failed = attempts >= row.maxAttempts;
+      const message = cause instanceof Error ? cause.message.slice(0, 800) : "Ошибка SMTP";
+      const when = nextOutboundMorning();
+      const whenLabel = when.toLocaleString("ru-RU", {
+        timeZone: "Europe/Minsk",
+        day: "numeric",
+        month: "long",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
       await prisma.$transaction([
         prisma.crmOutboxMessage.update({
           where: { id: row.id },
           data: {
-            status: failed ? "FAILED" : "APPROVED",
-            attempts,
-            nextAttemptAt: new Date(Date.now() + Math.min(300_000, 5_000 * 2 ** attempts)),
-            error: cause instanceof Error ? cause.message.slice(0, 1000) : "Ошибка SMTP",
+            status: "APPROVED",
+            attempts: 0,
+            nextAttemptAt: when,
+            error: `Не отправлено: ${message}. В очереди на ${whenLabel}.`,
           },
         }),
         prisma.crmMessage.update({
           where: { id: row.messageId },
-          data: { status: failed ? "FAILED" : "APPROVED" },
+          data: { status: "APPROVED" },
         }),
       ]);
     }

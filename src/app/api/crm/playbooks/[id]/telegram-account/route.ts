@@ -43,7 +43,14 @@ function publicConnection(connection: {
   updatedAt: Date;
 } | null) {
   if (!connection) return null;
-  let config: Record<string, unknown> = {};
+  let config: {
+    phoneMasked?: string;
+    username?: string;
+    firstName?: string;
+    codeViaApp?: boolean;
+    delivery?: string;
+    nextDelivery?: string | null;
+  } = {};
   try {
     config = JSON.parse(connection.config);
   } catch {
@@ -57,6 +64,7 @@ function publicConnection(connection: {
     firstName: config.firstName ?? "",
     codeViaApp: config.codeViaApp ?? true,
     delivery: config.delivery ?? (config.codeViaApp ? "APP" : "UNKNOWN"),
+    nextDelivery: config.nextDelivery ?? null,
     lastError: connection.lastError,
     updatedAt: connection.updatedAt,
   };
@@ -84,32 +92,61 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (playbook instanceof Response) return playbook;
 
     if (input.action === "START") {
+      const existing = await prisma.crmChannelConnection.findUnique({
+        where: { playbookId_type: { playbookId: id, type: "TELEGRAM_ACCOUNT" } },
+      });
+      if (
+        existing &&
+        ["CODE_REQUIRED", "PASSWORD_REQUIRED"].includes(existing.status) &&
+        Date.now() - existing.updatedAt.getTime() < 45_000
+      ) {
+        return error("Подождите ~45 секунд перед новым запросом кода — иначе Telegram глушит доставку.");
+      }
       const auth = await startTelegramAccountAuth(input);
+      const authSecret = {
+        apiId: auth.apiId,
+        apiHash: auth.apiHash,
+        phone: auth.phone,
+        phoneCodeHash: auth.phoneCodeHash,
+        session: auth.session,
+      };
       const connection = await prisma.crmChannelConnection.upsert({
         where: { playbookId_type: { playbookId: id, type: "TELEGRAM_ACCOUNT" } },
         create: {
           playbookId: id,
           type: "TELEGRAM_ACCOUNT",
           status: "CODE_REQUIRED",
-          encryptedSecret: encryptCrmSecret(JSON.stringify(auth)),
+          encryptedSecret: encryptCrmSecret(JSON.stringify(authSecret)),
           config: JSON.stringify({
             phoneMasked: maskedPhone(input.phone),
             codeViaApp: auth.isCodeViaApp,
             delivery: auth.delivery,
+            nextDelivery: auth.nextDelivery,
           }),
         },
         update: {
           status: "CODE_REQUIRED",
-          encryptedSecret: encryptCrmSecret(JSON.stringify(auth)),
+          encryptedSecret: encryptCrmSecret(JSON.stringify(authSecret)),
           config: JSON.stringify({
             phoneMasked: maskedPhone(input.phone),
             codeViaApp: auth.isCodeViaApp,
             delivery: auth.delivery,
+            nextDelivery: auth.nextDelivery,
           }),
           lastError: "",
         },
       });
-      return json({ connection: publicConnection(connection) });
+      return json({
+        connection: publicConnection(connection),
+        delivery: auth.delivery,
+        nextDelivery: auth.nextDelivery,
+        hint:
+          auth.delivery === "SMS"
+            ? "Код отправлен по SMS"
+            : auth.delivery === "APP"
+              ? "Код в приложении Telegram (чат «Telegram»), это не SMS. Нажмите «Отправить ещё раз», чтобы запросить SMS."
+              : "Код запрошен. Проверьте Telegram и SMS",
+      });
     }
 
     if (input.action === "RESEND") {
@@ -118,6 +155,9 @@ export async function POST(req: NextRequest, { params }: Params) {
       });
       if (!connection || connection.status === "CONNECTED") {
         return error("Сначала запросите код входа");
+      }
+      if (Date.now() - connection.updatedAt.getTime() < 45_000) {
+        return error("Подождите ~45 секунд перед «Отправить ещё раз» — частые запросы дают TIMEOUT и глушат код.");
       }
       const secret = JSON.parse(decryptCrmSecret(connection.encryptedSecret)) as TelegramAccountSecret;
       const resent = await resendTelegramAccountCode(secret, true);
@@ -136,6 +176,7 @@ export async function POST(req: NextRequest, { params }: Params) {
             phoneMasked: maskedPhone(resent.phone),
             codeViaApp: resent.isCodeViaApp,
             delivery: resent.delivery,
+            nextDelivery: resent.nextDelivery,
           }),
           lastError: "",
         },
@@ -143,11 +184,12 @@ export async function POST(req: NextRequest, { params }: Params) {
       return json({
         connection: publicConnection(updated),
         delivery: resent.delivery,
+        nextDelivery: resent.nextDelivery,
         hint:
           resent.delivery === "SMS"
             ? "Новый код отправлен по SMS"
             : resent.delivery === "APP"
-              ? "Новый код отправлен в приложение Telegram: откройте чат «Telegram»"
+              ? "Снова код в приложении Telegram (чат «Telegram»). SMS Telegram не выдал — подождите пару минут и повторите."
               : "Новый код запрошен. Проверьте Telegram и SMS",
       });
     }

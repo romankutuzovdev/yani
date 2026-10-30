@@ -69,7 +69,13 @@ type AgentDetail = {
   orgUnp?: string;
   planName?: string;
   planMonthlyPrice?: number;
+  salesEnabled?: boolean;
+  salesPlanName?: string;
+  salesPlanMonthlyPrice?: number;
+  salesPlaybookLimit?: number;
+  salesAgentLimit?: number;
   isPrimary?: boolean;
+  webSearchEnabled?: boolean;
   temperature: number;
   maxIterations: number;
   status: string;
@@ -102,6 +108,11 @@ export default function AgentDetailPage() {
   const [orgUnp, setOrgUnp] = useState("");
   const [planName, setPlanName] = useState("");
   const [planPrice, setPlanPrice] = useState("");
+  const [salesEnabled, setSalesEnabled] = useState(false);
+  const [salesPlanName, setSalesPlanName] = useState("");
+  const [salesPlanPrice, setSalesPlanPrice] = useState("");
+  const [salesPlaybookLimit, setSalesPlaybookLimit] = useState("");
+  const [salesAgentLimit, setSalesAgentLimit] = useState("1");
   const [orgPassword, setOrgPassword] = useState("");
   const [orgBusy, setOrgBusy] = useState(false);
   const [copiedAccess, setCopiedAccess] = useState<"email" | "password" | "both" | "">("");
@@ -160,6 +171,15 @@ export default function AgentDetailPage() {
     setOrgUnp(raw?.orgUnp ?? "");
     setPlanName(raw?.planName ?? "");
     setPlanPrice(raw?.planMonthlyPrice ? String(raw.planMonthlyPrice) : "");
+    setSalesEnabled(Boolean(raw?.salesEnabled));
+    setSalesPlanName(raw?.salesPlanName ?? "");
+    setSalesPlanPrice(raw?.salesPlanMonthlyPrice ? String(raw.salesPlanMonthlyPrice) : "");
+    setSalesPlaybookLimit(
+      raw?.salesPlaybookLimit != null && raw.salesPlaybookLimit > 0
+        ? String(raw.salesPlaybookLimit)
+        : "",
+    );
+    setSalesAgentLimit(raw?.salesAgentLimit != null ? String(raw.salesAgentLimit || 1) : "1");
     setSkills(s.skills ?? []);
     if (orgMode) {
       setSpentLabel("");
@@ -224,6 +244,7 @@ export default function AgentDetailPage() {
               monthlyRequestLimit: agent.monthlyRequestLimit ?? 0,
               isPrimary: Boolean(agent.isPrimary),
             }),
+        webSearchEnabled: Boolean(agent.webSearchEnabled),
         temperature: agent.temperature,
         maxIterations: agent.maxIterations,
         skillAssignments: agent.skills.map((s, i) => ({
@@ -267,6 +288,41 @@ export default function AgentDetailPage() {
     router.push("/admin/agents");
   }
 
+  function orgAccessPayload() {
+    return {
+      orgName,
+      orgUnp,
+      planName,
+      planMonthlyPrice: Math.max(0, Number(planPrice) || 0),
+      salesEnabled,
+      salesPlanName,
+      salesPlanMonthlyPrice: Math.max(0, Number(salesPlanPrice) || 0),
+      salesPlaybookLimit: Math.max(0, Math.floor(Number(salesPlaybookLimit) || 0)),
+      salesAgentLimit: Math.max(1, Math.floor(Number(salesAgentLimit) || 1)),
+    };
+  }
+
+  function applyOrgAccessResponse(data: Record<string, unknown>) {
+    if (typeof data.orgName === "string") setOrgName(data.orgName);
+    if (typeof data.orgUnp === "string") setOrgUnp(data.orgUnp);
+    if (typeof data.planName === "string") setPlanName(data.planName);
+    if (data.planMonthlyPrice != null) {
+      setPlanPrice(Number(data.planMonthlyPrice) ? String(data.planMonthlyPrice) : "");
+    }
+    if (typeof data.salesEnabled === "boolean") setSalesEnabled(data.salesEnabled);
+    if (typeof data.salesPlanName === "string") setSalesPlanName(data.salesPlanName);
+    if (data.salesPlanMonthlyPrice != null) {
+      setSalesPlanPrice(Number(data.salesPlanMonthlyPrice) ? String(data.salesPlanMonthlyPrice) : "");
+    }
+    if (data.salesPlaybookLimit != null) {
+      const n = Number(data.salesPlaybookLimit) || 0;
+      setSalesPlaybookLimit(n > 0 ? String(n) : "");
+    }
+    if (data.salesAgentLimit != null) {
+      setSalesAgentLimit(String(Math.max(1, Number(data.salesAgentLimit) || 1)));
+    }
+  }
+
   async function generateAccess() {
     if (!agent || orgBusy) return;
     setOrgBusy(true);
@@ -274,12 +330,7 @@ export default function AgentDetailPage() {
     const res = await fetch(`/api/agents/${agent.id}/access`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        orgName,
-        orgUnp,
-        planName,
-        planMonthlyPrice: Math.max(0, Number(planPrice) || 0),
-      }),
+      body: JSON.stringify(orgAccessPayload()),
     });
     const data = await res.json().catch(() => ({}));
     setOrgBusy(false);
@@ -288,12 +339,14 @@ export default function AgentDetailPage() {
       return;
     }
     setOrgEmail(data.email);
-    setOrgName(data.orgName ?? orgName);
-    setOrgUnp(data.orgUnp ?? orgUnp);
-    setPlanName(data.planName ?? planName);
-    if (data.planMonthlyPrice != null) setPlanPrice(data.planMonthlyPrice ? String(data.planMonthlyPrice) : "");
+    applyOrgAccessResponse(data);
     setOrgPassword(data.password);
-    setMessage("Доступ готов. Скопируйте почту и пароль — пароль больше не покажется.");
+    const salesNote = data.salesEnabled
+      ? data.playbookCreated
+        ? " CRM продаж включён, создан навык «Продажи»."
+        : " CRM продаж включён."
+      : "";
+    setMessage(`Доступ готов. Скопируйте почту и пароль — пароль больше не покажется.${salesNote}`);
   }
 
   async function saveOrgProfile() {
@@ -303,12 +356,7 @@ export default function AgentDetailPage() {
     const res = await fetch(`/api/agents/${agent.id}/access`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        orgName,
-        orgUnp,
-        planName,
-        planMonthlyPrice: Math.max(0, Number(planPrice) || 0),
-      }),
+      body: JSON.stringify(orgAccessPayload()),
     });
     const data = await res.json().catch(() => ({}));
     setOrgBusy(false);
@@ -316,11 +364,9 @@ export default function AgentDetailPage() {
       setMessage(data.error ?? "Не удалось сохранить организацию");
       return;
     }
-    setOrgName(data.orgName ?? orgName);
-    setOrgUnp(data.orgUnp ?? orgUnp);
-    setPlanName(data.planName ?? planName);
-    if (data.planMonthlyPrice != null) setPlanPrice(data.planMonthlyPrice ? String(data.planMonthlyPrice) : "");
-    setMessage("Данные организации сохранены");
+    applyOrgAccessResponse(data);
+    const salesNote = data.playbookCreated ? " Создан навык продаж «Продажи»." : "";
+    setMessage(`Данные организации сохранены.${salesNote}`);
   }
 
   async function copyAccess(value: string, what: "email" | "password" | "both") {
@@ -551,7 +597,7 @@ export default function AgentDetailPage() {
           />
         </label>
         <label className="mt-3 block text-sm text-slate-700">
-          Цена в месяц
+          Цена тарифа чата в месяц
           <input
             type="number"
             min={0}
@@ -563,6 +609,68 @@ export default function AgentDetailPage() {
             className="mt-1 w-full rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-2"
           />
         </label>
+
+        <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
+            <input
+              type="checkbox"
+              checked={salesEnabled}
+              onChange={(e) => setSalesEnabled(e.target.checked)}
+              className="rounded border-violet-300"
+            />
+            CRM продаж для организации
+          </label>
+          <p className="mt-1 text-xs text-slate-500">
+            В кабинете организации появится «CRM продаж» и навык продажи (если ещё нет). Лимиты ниже —
+            сколько менеджеров/навыков продаж и агентов по договору.
+          </p>
+          <div className={salesEnabled ? "mt-3 grid gap-3 sm:grid-cols-2" : "mt-3 grid gap-3 sm:grid-cols-2 opacity-50 pointer-events-none"}>
+            <label className="block text-sm text-slate-700 sm:col-span-2">
+              Название тарифа продаж
+              <input
+                value={salesPlanName}
+                onChange={(e) => setSalesPlanName(e.target.value)}
+                placeholder="Продажи Pro"
+                className="mt-1 w-full rounded-xl border border-violet-200 bg-white px-3 py-2"
+              />
+            </label>
+            <label className="block text-sm text-slate-700">
+              Стоимость продаж / месяц
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                inputMode="decimal"
+                value={salesPlanPrice}
+                onChange={(e) => setSalesPlanPrice(e.target.value)}
+                placeholder="0"
+                className="mt-1 w-full rounded-xl border border-violet-200 bg-white px-3 py-2"
+              />
+            </label>
+            <label className="block text-sm text-slate-700">
+              Лимит навыков продаж
+              <input
+                type="number"
+                min={0}
+                value={salesPlaybookLimit}
+                onChange={(e) => setSalesPlaybookLimit(e.target.value)}
+                placeholder="0 = без лимита"
+                className="mt-1 w-full rounded-xl border border-violet-200 bg-white px-3 py-2"
+              />
+            </label>
+            <label className="block text-sm text-slate-700 sm:col-span-2">
+              Лимит агентов с CRM
+              <input
+                type="number"
+                min={1}
+                value={salesAgentLimit}
+                onChange={(e) => setSalesAgentLimit(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-violet-200 bg-white px-3 py-2"
+              />
+            </label>
+          </div>
+        </div>
+
         {orgEmail ? (
           <p className="mt-3 text-sm text-slate-700">
             Почта: <span className="font-medium">{orgEmail}</span>
@@ -717,6 +825,22 @@ export default function AgentDetailPage() {
           placeholder={"Например:\nИщи ответ по всем навыкам ниже и не смешивай факты, если они из разных навыков.\n\nили:\nНе отвечай по существу. Перечисли навыки и попроси выбрать один."}
         />
         <p className="mt-2 text-xs text-slate-500">Сохраняется вместе с кнопкой «Сохранить» внизу страницы.</p>
+        <label className="mt-4 flex items-start gap-3 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            className="mt-1 rounded border-violet-300"
+            checked={Boolean(agent.webSearchEnabled)}
+            onChange={(e) => setAgent({ ...agent, webSearchEnabled: e.target.checked })}
+          />
+          <span>
+            <span className="font-medium">Поиск в интернете (галочка)</span>
+            <span className="mt-0.5 block text-slate-500">
+              Включает Яндекс для этого агента всегда, даже если в промпте про интернет ничего нет.
+              Отдельно: если в промпте агента, навыка или CRM-навыка продажи написано искать в интернете —
+              поиск тоже включится без этой галочки. Ключ — в Настройках.
+            </span>
+          </span>
+        </label>
       </section>
 
       {!orgMode && (

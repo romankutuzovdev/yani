@@ -1,4 +1,7 @@
 import { fail, ok, type AgentContext, type AgentTool } from "./types";
+import { assertPublicHttpUrl, fetchPageText } from "@/lib/fetchPageText";
+import { yandexSearchConfigured, yandexWebSearch } from "@/lib/yandexSearch";
+import { runWebResearch } from "@/lib/webResearch";
 
 export const calculatorTool: AgentTool = {
   name: "calculator",
@@ -79,12 +82,9 @@ export const httpRequestTool: AgentTool = {
     if (!data.url) return fail("url is required");
     let parsed: URL;
     try {
-      parsed = new URL(data.url);
-    } catch {
-      return fail("Invalid URL");
-    }
-    if (!["http:", "https:"].includes(parsed.protocol)) {
-      return fail("Only http/https URLs are allowed");
+      parsed = assertPublicHttpUrl(data.url);
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : "Invalid URL");
     }
 
     const controller = new AbortController();
@@ -117,10 +117,38 @@ export const httpRequestTool: AgentTool = {
   },
 };
 
+export const fetchPageTool: AgentTool = {
+  name: "fetch_page",
+  description:
+    "Open a public web page and return cleaned text (HTML stripped). Use after web_search to read a site.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      url: { type: "string", description: "Page URL (http/https)" },
+      maxChars: { type: "number", description: "Max characters of text (default 12000)" },
+    },
+    required: ["url"],
+  },
+  async execute(input, context) {
+    const data = input as { url?: string; maxChars?: number };
+    if (!data.url) return fail("url is required");
+    try {
+      const page = await fetchPageText({
+        url: data.url,
+        maxChars: data.maxChars,
+        signal: context.signal,
+      });
+      return ok(page);
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : "fetch_page failed");
+    }
+  },
+};
+
 export const webSearchTool: AgentTool = {
   name: "web_search",
   description:
-    "Search the web for information. Uses DuckDuckGo Instant Answer API (limited). Returns related topics when available.",
+    "Search the web. Prefers Yandex Search API (keys from admin settings); falls back to DuckDuckGo Instant Answer.",
   inputSchema: {
     type: "object",
     properties: {
@@ -133,11 +161,28 @@ export const webSearchTool: AgentTool = {
     if (!query) return fail("query is required");
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => controller.abort(), 20_000);
     const onAbort = () => controller.abort();
     context.signal?.addEventListener("abort", onAbort);
 
     try {
+      if (yandexSearchConfigured()) {
+        const result = await yandexWebSearch({
+          query,
+          limit: 8,
+          signal: controller.signal,
+          agentId: context.agentId,
+        });
+        return ok({
+          query: result.query,
+          provider: result.provider,
+          results: result.hits,
+          note: result.hits.length
+            ? undefined
+            : "Yandex не вернул результатов. Уточните запрос.",
+        });
+      }
+
       const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
       const res = await fetch(url, { signal: controller.signal });
       if (!res.ok) return fail(`Search failed with status ${res.status}`);
@@ -155,19 +200,62 @@ export const webSearchTool: AgentTool = {
 
       return ok({
         query,
+        provider: "duckduckgo",
         heading: data.Heading ?? null,
         abstract: data.AbstractText ?? null,
         abstractUrl: data.AbstractURL ?? null,
         related,
-        note: related.length || data.AbstractText
-          ? undefined
-          : "No rich results from Instant Answer API. Try a more specific query.",
+        note:
+          related.length || data.AbstractText
+            ? "Yandex не настроен — использован DuckDuckGo. Ключ задаётся в Настройках."
+            : "Нет результатов. Укажите ключ Яндекса в Настройках или уточните запрос.",
       });
     } catch (e) {
       return fail(e instanceof Error ? e.message : "web_search failed");
     } finally {
       clearTimeout(timeout);
       context.signal?.removeEventListener("abort", onAbort);
+    }
+  },
+};
+
+export const webResearchTool: AgentTool = {
+  name: "web_research",
+  description:
+    "Search the web (Yandex), open top result pages, extract text, and return a research pack. Use when you need facts from sites before answering or drafting a message.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "What to research" },
+      maxPages: { type: "number", description: "How many pages to open (1–5, default 3)" },
+    },
+    required: ["query"],
+  },
+  async execute(input, context) {
+    const data = input as { query?: string; maxPages?: number };
+    const query = String(data.query ?? "").trim();
+    if (!query) return fail("query is required");
+    try {
+      const bundle = await runWebResearch({
+        query,
+        maxPages: data.maxPages,
+        signal: context.signal,
+        agentId: context.agentId,
+      });
+      return ok({
+        query: bundle.query,
+        provider: bundle.provider,
+        hits: bundle.hits,
+        pages: bundle.pages.map((page) => ({
+          url: page.url,
+          title: page.title,
+          snippet: page.snippet,
+          text: page.text.slice(0, 6000),
+        })),
+        summaryText: bundle.summaryText,
+      });
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : "web_research failed");
     }
   },
 };

@@ -25,28 +25,56 @@ const agentSchema = z.object({
   toolIds: z.array(z.string()).optional(),
 });
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const cabinet = await requireCabinet();
   if (cabinet instanceof Response) return cabinet;
 
-  const agents = await prisma.agent.findMany({
-    where: cabinet.orgAgentId ? { id: cabinet.orgAgentId } : undefined,
-    include: {
-      character: { include: { assets: true } },
-      skills: { include: { skill: true } },
-      tools: { include: { tool: true } },
-      _count: { select: { tasks: true, memories: true } },
-    },
-    orderBy: { updatedAt: "desc" },
-  });
-  if (!cabinet.orgAgentId) return json({ agents });
-  return json({
-    agents: agents.map((agent) => ({
-      ...agent,
-      model: "",
-      skills: agent.skills.map((row) => ({ ...row, skill: { ...row.skill, model: "" } })),
-    })),
-  });
+  const brief = req.nextUrl.searchParams.get("brief") === "1";
+  const where = cabinet.orgAgentId ? { id: cabinet.orgAgentId } : undefined;
+
+  try {
+    if (brief) {
+      const agents = await prisma.agent.findMany({
+        where,
+        select: { id: true, name: true, isPrimary: true, slug: true, enabled: true },
+        orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
+      });
+      return json({ agents });
+    }
+
+    // List page only needs card fields — avoid heavy character/skill trees.
+    const agents = await prisma.agent.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        logoUrl: true,
+        status: true,
+        isPrimary: true,
+        model: true,
+        enabled: true,
+        updatedAt: true,
+        _count: { select: { tasks: true, memories: true } },
+      },
+      orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
+    });
+    if (!cabinet.orgAgentId) return json({ agents });
+    return json({
+      agents: agents.map((agent) => ({ ...agent, model: "" })),
+    });
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : "Failed to load agents";
+    // Typical after deploy: Prisma expects Agent.webSearchEnabled but SQLite column is missing.
+    if (/webSearchEnabled|no such column/i.test(message)) {
+      return error(
+        "В базе нет колонки Agent.webSearchEnabled. На сервере выполните миграцию или apply-release.",
+        500,
+      );
+    }
+    return error(message, 500);
+  }
 }
 
 export async function POST(req: NextRequest) {

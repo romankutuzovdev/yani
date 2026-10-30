@@ -1,0 +1,21 @@
+[Unit]
+Description=Yani CRM campaigns worker
+After=network.target yani-app.service
+PartOf=yani-app.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/www/yani
+Environment=NODE_ENV=production
+EnvironmentFile=-/var/www/yani/.env
+ExecStart=/usr/bin/node crm-workers/crm-worker.js
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=20
+StandardOutput=append:/var/log/yani-crm-worker.log
+StandardError=append:/var/log/yani-crm-worker.log
+
+[Install]
+WantedBy=multi-user.target
